@@ -198,11 +198,36 @@ install_release_binary_tarball() {
   rm -rf "$tmp"
 }
 
-log "Installing zellij (upstream release binary) -> ~/.local/bin/zellij"
-if command -v zellij >/dev/null 2>&1; then
-  ok "zellij already present (will be updated via maintenance)"
+semver_lt() {
+  # Returns 0 when $1 < $2, else 1
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" && "$1" != "$2" ]]
+}
+
+zellij_installed_version() {
+  command -v zellij >/dev/null 2>&1 || return 1
+  zellij --version 2>/dev/null | awk '{print $2}' | sed 's/^v//'
+}
+
+lazygit_installed_version() {
+  command -v lazygit >/dev/null 2>&1 || return 1
+  lazygit --version 2>/dev/null | sed -n 's/.*version=\([^, ]*\).*/\1/p' | sed 's/^v//'
+}
+
+log "Installing/updating zellij (upstream release binary) -> ~/.local/bin/zellij"
+ZELLIJ_VER="$(fetch_latest_version zellij-org/zellij)"
+if ZELLIJ_CURR="$(zellij_installed_version)"; then
+  if semver_lt "$ZELLIJ_CURR" "$ZELLIJ_VER"; then
+    install_release_binary_tarball \
+      "zellij-org/zellij" \
+      "$ZELLIJ_VER" \
+      "https://github.com/zellij-org/zellij/releases/download/v{VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" \
+      "zellij" \
+      "zellij"
+    ok "zellij upgraded: v$ZELLIJ_CURR -> v$ZELLIJ_VER"
+  else
+    ok "zellij already current (v$ZELLIJ_CURR)"
+  fi
 else
-  ZELLIJ_VER="$(fetch_latest_version zellij-org/zellij)"
   install_release_binary_tarball \
     "zellij-org/zellij" \
     "$ZELLIJ_VER" \
@@ -212,11 +237,21 @@ else
   ok "zellij v$ZELLIJ_VER installed"
 fi
 
-log "Installing lazygit (upstream release binary) -> ~/.local/bin/lazygit"
-if command -v lazygit >/dev/null 2>&1; then
-  ok "lazygit already present (will be updated via maintenance)"
+log "Installing/updating lazygit (upstream release binary) -> ~/.local/bin/lazygit"
+LAZYGIT_VER="$(fetch_latest_version jesseduffield/lazygit)"
+if LAZYGIT_CURR="$(lazygit_installed_version)"; then
+  if semver_lt "$LAZYGIT_CURR" "$LAZYGIT_VER"; then
+    install_release_binary_tarball \
+      "jesseduffield/lazygit" \
+      "$LAZYGIT_VER" \
+      "https://github.com/jesseduffield/lazygit/releases/download/v{VERSION}/lazygit_{VERSION}_Linux_x86_64.tar.gz" \
+      "lazygit" \
+      "lazygit"
+    ok "lazygit upgraded: v$LAZYGIT_CURR -> v$LAZYGIT_VER"
+  else
+    ok "lazygit already current (v$LAZYGIT_CURR)"
+  fi
 else
-  LAZYGIT_VER="$(fetch_latest_version jesseduffield/lazygit)"
   install_release_binary_tarball \
     "jesseduffield/lazygit" \
     "$LAZYGIT_VER" \
@@ -302,5 +337,4 @@ Next steps:
 Note:
   - zellij is installed as an upstream release binary in ~/.local/bin (no snap, no apt lag).
   - gh/node/glow are apt-managed via upstream repos (update via apt upgrade).
-
 EOF
