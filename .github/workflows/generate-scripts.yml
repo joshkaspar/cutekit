@@ -1,0 +1,36 @@
+name: Generate bootstrap and maintenance scripts
+
+on:
+  push:
+    paths:
+      - 'tools-manifest.yaml'
+      - 'scripts/generate_scripts.py'
+      - '.github/workflows/generate-scripts.yml'
+      - 'bootstrap.sh'
+      - 'maintenance.sh'
+  pull_request:
+    paths:
+      - 'tools-manifest.yaml'
+      - 'scripts/generate_scripts.py'
+      - '.github/workflows/generate-scripts.yml'
+      - 'bootstrap.sh'
+      - 'maintenance.sh'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+
+      - name: Generate scripts
+        run: python scripts/generate_scripts.py
+
+      - name: Ensure generated scripts are up to date
+        run: git diff --exit-code -- bootstrap.sh maintenance.sh
