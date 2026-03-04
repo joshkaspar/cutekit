@@ -1,0 +1,49 @@
+{
+  "release_tools": [
+    {
+      "name": "zellij",
+      "repo": "zellij-org/zellij",
+      "url_template": "https://github.com/zellij-org/zellij/releases/download/v{VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz",
+      "tar_binary": "zellij",
+      "target_binary": "zellij",
+      "version_cmd": "zellij --version 2>/dev/null | awk '{print $2}' | sed 's/^v//'"
+    },
+    {
+      "name": "lazygit",
+      "repo": "jesseduffield/lazygit",
+      "url_template": "https://github.com/jesseduffield/lazygit/releases/download/v{VERSION}/lazygit_{VERSION}_Linux_x86_64.tar.gz",
+      "tar_binary": "lazygit",
+      "target_binary": "lazygit",
+      "version_cmd": "lazygit --version 2>/dev/null | sed -n 's/.*version=\\([^, ]*\\).*/\\1/p' | sed 's/^v//'"
+    }
+  ],
+  "bootstrap": {
+    "apt_baseline_packages": [
+      "ca-certificates", "curl", "wget", "git", "unzip", "xz-utils", "jq", "gnupg",
+      "build-essential", "openssh-server", "qemu-guest-agent", "zsh", "mc", "btop", "ripgrep"
+    ],
+    "apt_repo_tools": ["gh", "nodejs", "glow"],
+    "pyenv_deps": [
+      "libssl-dev", "zlib1g-dev", "libbz2-dev", "libreadline-dev", "libsqlite3-dev",
+      "libncursesw5-dev", "libffi-dev", "liblzma-dev", "tk-dev"
+    ],
+    "npm_tools": [
+      {"name": "codex", "package": "@openai/codex"}
+    ],
+    "installer_tools": [
+      {"name": "claude", "install_cmd": "curl -fsSL https://claude.ai/install.sh | bash"}
+    ]
+  },
+  "maintenance": {
+    "npm_tools": [
+      {"name": "codex", "package": "@openai/codex"}
+    ],
+    "installer_tools": [
+      {
+        "name": "claude",
+        "update_cmd": "curl -fsSL https://claude.ai/install.sh | bash",
+        "version_cmd": "claude --version 2>/dev/null || echo installed"
+      }
+    ]
+  }
+}
