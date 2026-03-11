@@ -238,6 +238,14 @@ def bs_github_releases(cfg):
         url_tpl = entry["url"].replace("{repo}", repo)
         binary = entry["binary"]
         nc = note_comment(entry)
+
+        zshrc = entry.get("zshrc_block")
+        zshrc_block = ""
+        if zshrc:
+            content = zshrc["content"].rstrip()
+            marker = zshrc["marker"]
+            zshrc_block = f'\nensure_block "{marker}" \\\n\'{content}\''
+
         chunks.append(f"""\
 log "Install: {name}{nc}"
 {name.upper()}_VER="$(fetch_latest_version {repo})"
@@ -250,7 +258,7 @@ if ! command -v {name} >/dev/null 2>&1; then
   ok "{name} v${name.upper()}_VER installed"
 else
   ok "{name} already present (maintenance will keep it current)"
-fi
+fi{zshrc_block}
 """)
     return "\n".join(chunks)
 

@@ -25,6 +25,9 @@ apt:
   - mc
   - btop
   - ripgrep
+  - bat
+  - git-delta
+  - visidata
   - openssh-server
   - qemu-guest-agent
 
@@ -56,12 +59,35 @@ apt_repos:
 # Fetched from latest GitHub release, extracted, dropped in ~/.local/bin.
 # Version-checked and updated on every maintenance run.
 github_releases:
+  - name: fzf
+    repo: junegunn/fzf
+    note: "Fuzzy finder — required by navi"
+    url: "https://github.com/{repo}/releases/download/v{version}/fzf-{version}-linux_amd64.tar.gz"
+    binary: fzf
+    version_cmd: "fzf --version | awk '{print $1}'"
+    zshrc_block:
+      marker: "# --- workbench: fzf ---"
+      content: 'source <(fzf --zsh)'
+
+  - name: navi
+    repo: denisidoro/navi
+    note: "Interactive cheatsheet tool — requires fzf"
+    url: "https://github.com/{repo}/releases/download/v{version}/navi-v{version}-x86_64-unknown-linux-musl.tar.gz"
+    binary: navi
+    version_cmd: "navi --version | awk '{print $2}'"
+    zshrc_block:
+      marker: "# --- workbench: navi ---"
+      content: 'eval "$(navi widget zsh)"'
+
   - name: zellij
     repo: zellij-org/zellij
     note: "Terminal multiplexer (prefer over tmux)"
     url: "https://github.com/{repo}/releases/download/v{version}/zellij-x86_64-unknown-linux-musl.tar.gz"
     binary: zellij
     version_cmd: "zellij --version | awk '{print $2}'"
+    zshrc_block:
+      marker: "# --- workbench: zellij-autostart ---"
+      content: 'eval "$(zellij setup --generate-auto-start zsh)"'
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -102,6 +128,22 @@ curl_installers:
         fi
     maintenance: git-pull   # update via git -C ~/.pyenv pull
 
+  - name: atuin
+    url: https://setup.atuin.sh
+    check: "command -v atuin"
+    note: "Shell history sync and search"
+    zshrc_block:
+      marker: "# --- workbench: atuin ---"
+      content: 'eval "$(atuin init zsh)"'
+
+  - name: zoxide
+    url: https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh
+    check: "command -v zoxide"
+    note: "Smarter cd — use 'z' instead of 'cd'"
+    zshrc_block:
+      marker: "# --- workbench: zoxide ---"
+      content: 'eval "$(zoxide init zsh)"'
+
   - name: claude
     url: https://claude.ai/install.sh
     check: "command -v claude || [ -x \"$HOME/.local/bin/claude\" ]"
@@ -128,6 +170,7 @@ services:
 # Global notes not tied to a specific tool.
 post_bootstrap_notes:
   - "Re-login (or: exec zsh) to activate new default shell and PATH."
+  - "bat symlink: mkdir -p ~/.local/bin && ln -sf /usr/bin/batcat ~/.local/bin/bat"
   - |
     SSH hardening: after confirming key-based login works, edit
       /etc/ssh/sshd_config.d/99-workbench-hardening.conf
