@@ -6,6 +6,8 @@ Bootstrap script for building an Ubuntu 24.04.x “TUI workbench” with an SSH-
 
 - [ ] Add a 'real' editor like Helix or Micro
 - [ ] Add chezmoi
+- [ ] move environment to VPS
+- [ ] implement cert and reverse proxy (caddy)
 - [x] Add popular TUI apps: fzf atuin zoxid bat delta navi visidata
 - [x] Add steps to make zsh default
 - [x] Add steps to start zellij by defalault
