@@ -176,3 +176,13 @@ post_bootstrap_notes:
       /etc/ssh/sshd_config.d/99-workbench-hardening.conf
     and uncomment: PasswordAuthentication no
     then: sudo systemctl reload ssh
+  - |
+    Zellij web terminal setup:
+    1. SSH in once so zellij autostart creates a session.
+    2. Enable the web server: open the session manager (Ctrl o + s) and enable
+       the web server there, or add to ~/.config/zellij/config.kdl:
+         start_web_server true
+    3. Create a login token (shown once — save it):
+         zellij web --create-token
+    4. Point your reverse proxy (Cloudflare, Caddy, etc.) at http://localhost:8082
+    5. Bookmark https://<your-domain>/main to drop straight into your session.
