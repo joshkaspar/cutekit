@@ -43,12 +43,13 @@ fetch_latest_version() {
 
 install_release_binary_tarball() {
   local version="$1" url_tpl="$2" bin_in="$3" target="$4"
-  local url tmp
+  local url tmp bin_path
   url="${url_tpl//\{version\}/$version}"
   tmp="$(mktemp -d)"
   curl -fsSL "$url" -o "$tmp/pkg.tgz"
-  tar -xzf "$tmp/pkg.tgz" -C "$tmp" "$bin_in"
-  install -m 755 "$tmp/$bin_in" "$HOME/.local/bin/$target"
+  tar -xzf "$tmp/pkg.tgz" -C "$tmp"
+  bin_path="$(find "$tmp" -name "$bin_in" -type f | head -1)"
+  install -m 755 "$bin_path" "$HOME/.local/bin/$target"
   rm -rf "$tmp"
 }
 
