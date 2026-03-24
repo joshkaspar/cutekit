@@ -1,0 +1,596 @@
+#!/usr/bin/env python3
+"""
+2-generate.py — cutekit config generator
+Milestone 3: Read the config, print a summary, write mise.toml, and write 3-setup.sh.
+
+Usage:
+  python3 2-generate.py                    # reads 1-config.yaml
+  python3 2-generate.py new-config.yaml   # reads a different file
+"""
+
+import sys
+import os
+import stat
+from dataclasses import dataclass, field
+from typing import Optional
+
+import yaml  # pip install pyyaml
+
+
+# ─── Data structure ───────────────────────────────────────────────────────────
+#
+# A dataclass is a clean way to define what a "Tool" looks like in Python.
+# Think of it as a template: every tool loaded from the YAML will become
+# one of these objects with named fields, instead of a raw dictionary
+# where you have to remember what keys exist.
+#
+# Optional[str] means the field can hold a string or be absent (None).
+# field(default_factory=list) means the default value is an empty list.
+# We can't write `= []` directly in a dataclass — this is a Python quirk
+# to prevent all instances from accidentally sharing the same list object.
+
+@dataclass
+class Tool:
+    name:         str                        # Human-friendly label
+    backend:      str                        # How it gets installed
+    package:      Optional[str] = None       # apt package name (apt backend only)
+    source:       Optional[str] = None       # mise source identifier
+    version:      Optional[str] = None       # mise version (usually "latest")
+    shell_setup:  list = field(default_factory=list)  # Lines to write into .zshrc.setup
+    post_install: list          = field(default_factory=list)  # Actionable steps
+    reference:    list          = field(default_factory=list)  # Background notes
+    apt_deps:     list          = field(default_factory=list)  # Extra apt prereqs
+    installed_check: Optional[str] = None    # curl only — bash expression to detect existing install
+    expose:       Optional[dict] = None      # Binary rename: {installed_binary, as}
+    url:          Optional[str] = None       # curl backend: the URL to pipe to bash
+
+
+# ─── Load ─────────────────────────────────────────────────────────────────────
+#
+# This function opens the YAML file and returns the raw contents as a
+# plain Python dictionary. All YAML lists become Python lists,
+# and all YAML key: value pairs become Python dict entries.
+
+def load_yaml(filepath):
+    """
+    Opens a YAML file and converts it into a Python dictionary.
+    Returns the dictionary, or exits with an error message if the file
+    is missing or contains invalid YAML.
+    """
+    try:
+        with open(filepath, "r") as input_file:
+            return yaml.safe_load(input_file)
+
+    except FileNotFoundError:
+        print(f"Error: The file '{filepath}' was not found.")
+        sys.exit(1)
+
+    except yaml.YAMLError as yaml_error:
+        print(f"Error: Could not parse '{filepath}' as YAML.")
+        print(f"Detail: {yaml_error}")
+        sys.exit(1)
+
+
+# ─── Parse ────────────────────────────────────────────────────────────────────
+#
+# This function takes the raw dictionary from the YAML and turns each entry
+# in the `tools:` list into a proper Tool object (defined above).
+#
+# .get() is used instead of ["key"] everywhere. The difference:
+#   data["key"]       → crashes with KeyError if the key doesn't exist
+#   data.get("key")   → returns None if the key doesn't exist (safe)
+
+def parse_tools(list_from_yaml):
+    """
+    Converts raw YAML dictionary data into a list of Tool objects.
+    Each entry in the YAML tools list becomes one Tool with named fields.
+    """
+    tools = []
+
+    for tool_dictionary in list_from_yaml:
+        processed_tool = Tool(
+            name         = tool_dictionary.get("name",         "<unnamed>"),
+            backend      = tool_dictionary.get("backend",      "<missing>"),
+            package      = tool_dictionary.get("package"),
+            source       = tool_dictionary.get("source"),
+            version      = tool_dictionary.get("version"),
+            shell_setup  = tool_dictionary.get("shell_setup", []),
+            post_install = tool_dictionary.get("post_install", []),
+            reference    = tool_dictionary.get("reference",    []),
+            apt_deps     = tool_dictionary.get("apt_deps",     []),
+            installed_check = tool_dictionary.get("installed_check"),
+            expose       = tool_dictionary.get("expose"),
+            url          = tool_dictionary.get("url"),
+        )
+
+        tools.append(processed_tool)
+
+    return tools
+
+
+# ─── Validate ─────────────────────────────────────────────────────────────────
+#
+# Walk every Tool object and check for configuration problems.
+# We collect all warnings into a list instead of stopping at the first error,
+# so the user can fix everything in one pass rather than one problem at a time.
+
+# Every backend except 'apt' and 'curl' is managed by mise.
+# This constant is referenced by both validate() and get_mise_tools() below.
+MISE_BACKENDS = {"aqua", "github", "gitlab", "npm", "pipx", "cargo", "go", "asdf"}
+
+def validate(tools):
+    """
+    Checks every Tool object for configuration problems.
+    Returns a list of warning strings — one per problem found.
+    An empty list means the config is clean.
+    """
+    warnings = []
+
+    for tool in tools:
+        if tool.backend == "<missing>":
+            warnings.append(f"  [{tool.name}] Missing required field: 'backend'")
+
+        elif tool.backend == "apt" and not tool.package:
+            warnings.append(f"  [{tool.name}] backend 'apt' requires a 'package' field")
+
+        elif tool.backend in MISE_BACKENDS and not tool.source:
+            warnings.append(f"  [{tool.name}] backend '{tool.backend}' should have a 'source' field")
+
+        elif tool.backend == "curl" and not tool.url:
+            warnings.append(f"  [{tool.name}] backend 'curl' requires a 'url' field")
+
+    return warnings
+
+
+# ─── M2: Build mise.toml ─────────────────────────────────────────────────────
+#
+# mise.toml only cares about tools that are installed through mise.
+# In this project, that means every backend listed in MISE_BACKENDS above.
+#
+# We keep each concern in its own function so each function has one job:
+#   get_mise_tools()         — filter the list
+#   build_mise_plugin_name() — format one tool's identifier
+#   build_mise_toml_text()   — assemble the full file content
+#   write_mise_toml()        — orchestrate and write the file
+
+def get_mise_tools(tools):
+    """
+    Returns only the tools that should be written into mise.toml.
+    """
+    mise_tools = []
+
+    for tool in tools:
+        if tool.backend in MISE_BACKENDS:
+            mise_tools.append(tool)
+
+    return mise_tools
+
+
+def build_mise_plugin_name(tool):
+    """
+    Converts one Tool object into the plugin identifier mise expects.
+
+    Examples:
+      backend=aqua,   source=junegunn/fzf      -> aqua:junegunn/fzf
+      backend=github, source=sxyazi/yazi       -> github:sxyazi/yazi
+      backend=npm,    source=@openai/codex     -> npm:@openai/codex
+    """
+    return f"{tool.backend}:{tool.source}"
+
+
+def build_mise_toml_text(mise_tools):
+    """
+    Builds the full text content for mise.toml from a list of mise-managed tools.
+    """
+    lines = []
+
+    # This header makes it obvious the file should not be edited by hand.
+    lines.append("# Generated by 2-generate.py")
+    lines.append("")
+    lines.append("[tools]")
+
+    # Sort by plugin name so the output is stable and easy to diff across runs.
+    sorted_tools = sorted(mise_tools, key=build_mise_plugin_name)
+
+    for tool in sorted_tools:
+        plugin_name = build_mise_plugin_name(tool)
+
+        # If the tool has no version specified in the config, default to "latest".
+        # In Python, `x or y` returns y when x is None or empty.
+        tool_version = tool.version or "latest"
+
+        lines.append(f'"{plugin_name}" = "{tool_version}"')
+
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_text_file(filepath, text):
+    """
+    Writes plain text to a file, replacing any previous contents.
+    """
+    with open(filepath, "w") as output_file:
+        output_file.write(text)
+
+
+def write_mise_toml(tools):
+    """
+    Filters mise-managed tools, converts them into TOML, and writes mise.toml.
+    """
+    mise_tools = get_mise_tools(tools)
+    mise_toml_text = build_mise_toml_text(mise_tools)
+    write_text_file("mise.toml", mise_toml_text)
+
+    print(f"Wrote: mise.toml ({len(mise_tools)} tools)")
+
+
+# ─── M3: Build 3-setup.sh ────────────────────────────────────────────────────
+#
+# The setup script handles two things:
+#   1. All apt installs — one combined `apt install` call for every apt package
+#      and apt_dep across all tools
+#   2. All curl installers — one block per tool, with optional skip-if logic
+#
+# Everything else (mise, cargo, npm, etc.) is NOT in this script.
+# mise handles those after this script runs.
+#
+# Each concern has its own function, same pattern as the mise section above:
+#   get_apt_packages()    — collect all apt package names
+#   get_curl_tools()      — filter curl-backend tools
+#   build_setup_sh_text() — assemble the full script content
+#   write_setup_sh()      — orchestrate and write the file
+
+def get_apt_packages(tools):
+    """
+    Collects every apt package name needed across all tools.
+
+    This includes two sources:
+      - tools with backend: apt  (their `package` field)
+      - any tool with `apt_deps` (prerequisite packages needed before install)
+
+    Returns a sorted list so the output is stable across runs.
+    Using a set internally ensures no duplicates if two tools share a dep.
+    """
+    apt_packages = set()
+
+    for tool in tools:
+        if tool.backend == "apt" and tool.package:
+            apt_packages.add(tool.package)
+
+        for dep in tool.apt_deps:
+            apt_packages.add(dep)
+
+    return sorted(apt_packages)
+
+
+def get_curl_tools(tools):
+    """
+    Returns only the tools that use the curl backend.
+    """
+    curl_tools = []
+
+    for tool in tools:
+        if tool.backend == "curl":
+            curl_tools.append(tool)
+
+    return curl_tools
+
+
+def build_setup_sh_text(apt_packages, curl_tools):
+    """
+    Builds the full text content for 3-setup.sh.
+    Accepts pre-filtered lists so this function only has to format, not filter.
+    """
+    lines = []
+
+    lines.append("#!/usr/bin/env bash")
+    lines.append("# Generated by 2-generate.py")
+    lines.append("# Do not edit directly — edit 1-config.yaml and regenerate.")
+    lines.append("")
+    lines.append("set -euo pipefail")
+    lines.append("")
+
+    # log() prints a bold blue section header.
+    # ok() prints a green confirmation line.
+    # The \033[ codes are ANSI escape sequences for color; \033[0m resets it.
+    lines.append('log() { printf "\\n\\033[1;34m==> %s\\033[0m\\n" "$1"; }')
+    lines.append('ok()  { printf "    \\033[0;32mOK: %s\\033[0m\\n" "$1"; }')
+    lines.append("")
+
+    # Safety checks — bail out early if the environment isn't right.
+    lines.append('if [[ $EUID -eq 0 ]]; then')
+    lines.append('    echo "Run this script as a normal user, not as root."')
+    lines.append("    exit 1")
+    lines.append("fi")
+    lines.append('if ! command -v sudo >/dev/null 2>&1; then')
+    lines.append('    echo "sudo is required but was not found."')
+    lines.append("    exit 1")
+    lines.append("fi")
+    lines.append('if ! command -v curl >/dev/null 2>&1; then')
+    lines.append('    echo "curl is required but was not found."')
+    lines.append("    exit 1")
+    lines.append("fi")
+    lines.append("")
+
+    # ── Section 1: apt ────────────────────────────────────────────────────────
+    # One combined install call covers both apt-backend tools and apt_deps.
+    # DEBIAN_FRONTEND=noninteractive prevents apt from pausing to ask questions.
+    # Packages are listed one per line (with backslash continuation) so the
+    # generated script is easy to read and diff.
+    if apt_packages:
+        lines.append('log "Installing apt packages..."')
+        lines.append("sudo apt-get update -qq")
+        lines.append("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \\")
+
+        for package_name in apt_packages:
+            lines.append(f"    {package_name} \\")
+
+        # The final package line must not end with a backslash.
+        lines[-1] = f"    {apt_packages[-1]}"
+
+        lines.append('ok "apt packages installed"')
+        lines.append("")
+
+    # ── Section 2: curl installers ────────────────────────────────────────────
+    for tool in curl_tools:
+        if tool.installed_check:
+            # If the tool is already present, skip the curl install entirely and
+            # tell the user to update it manually — curl installers are not safe
+            # to re-run blindly.
+            lines.append(f"if {tool.installed_check} > /dev/null 2>&1; then")
+            lines.append(f'    log "{tool.name} already installed — to update, see the tool\'s own documentation"')
+            lines.append("else")
+            lines.append(f'    log "Installing {tool.name}..."')
+            lines.append(f"    curl -fsSL {tool.url} | bash")
+            lines.append(f'    ok "{tool.name} installed"')
+            lines.append("fi")
+        else:
+            lines.append(f'log "Installing {tool.name}..."')
+            lines.append(f"    curl -fsSL {tool.url} | bash")
+            lines.append(f'ok "{tool.name} installed"')
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_setup_sh(tools):
+    """
+    Filters apt packages and curl tools, builds the script, and writes 3-setup.sh.
+    Filtering happens here so the counts are available for both the file content
+    and the confirmation message, without running the filters twice.
+    """
+    apt_packages = get_apt_packages(tools)
+    curl_tools = get_curl_tools(tools)
+
+    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools)
+    write_text_file("3-setup.sh", setup_sh_text)
+
+    current_mode = os.stat("3-setup.sh").st_mode
+    os.chmod("3-setup.sh", current_mode | stat.S_IEXEC)
+
+    print(f"Wrote: 3-setup.sh ({len(apt_packages)} apt packages, {len(curl_tools)} curl installers)")
+
+
+# ─── .zshrc.setup ─────────────────────────────────────────────────────────────
+#
+# Collects all shell_setup blocks from tools and writes them into a single
+# sourced file. The output filename comes from the top-level shell: section
+# in the config, so changing it there changes the output filename.
+
+def build_zshrc_setup_text(tools_with_shell_setup):
+    """
+    Builds the full text content for .zshrc.setup from a list of tools
+    that have shell_setup entries. Each tool gets a comment header and
+    then its lines, separated by blank lines.
+    """
+    lines = []
+    lines.append("# Generated by 2-generate.py — do not edit directly")
+
+    for current_tool in tools_with_shell_setup:
+        lines.append("")
+        lines.append(f"# {current_tool.name}")
+        for setup_line in current_tool.shell_setup:
+            lines.append(setup_line)
+
+    return "\n".join(lines)
+
+
+def write_zshrc_setup(tools, config):
+    """
+    Filters tools that have shell_setup blocks, builds the file content,
+    and writes it to the filename specified in the config's shell: section.
+    """
+    shell_section = config.get("shell", {})
+    output_filename = shell_section.get("setup_file", ".zshrc.setup")
+
+    tools_with_shell_setup = []
+    for current_tool in tools:
+        if current_tool.shell_setup:
+            tools_with_shell_setup.append(current_tool)
+
+    zshrc_setup_text = build_zshrc_setup_text(tools_with_shell_setup)
+    write_text_file(output_filename, zshrc_setup_text)
+
+    print(f"Wrote: {output_filename} ({len(tools_with_shell_setup)} tools)")
+
+
+# ─── Markdown outputs ─────────────────────────────────────────────────────────
+#
+# Both post-install steps and the tool reference follow the same structure:
+# a generated header, then one ## section per tool, with each list item
+# written as a markdown bullet.
+
+def build_post_install_text(tools_with_post_install):
+    """
+    Builds the full text content for 4-post-install-steps.md.
+    Each tool gets a ## heading followed by its post_install items as bullets.
+    """
+    lines = []
+    lines.append("<!-- Generated by 2-generate.py — do not edit directly -->")
+
+    for current_tool in tools_with_post_install:
+        lines.append("")
+        lines.append(f"## {current_tool.name}")
+        for step in current_tool.post_install:
+            lines.append(f"- {step}")
+
+    return "\n".join(lines)
+
+
+def write_post_install(tools):
+    """
+    Filters tools that have post_install entries, builds the markdown content,
+    and writes it to 4-post-install-steps.md.
+    """
+    tools_with_post_install = []
+    for current_tool in tools:
+        if current_tool.post_install:
+            tools_with_post_install.append(current_tool)
+
+    post_install_text = build_post_install_text(tools_with_post_install)
+    write_text_file("4-post-install-steps.md", post_install_text)
+
+    print(f"Wrote: 4-post-install-steps.md ({len(tools_with_post_install)} tools)")
+
+
+def build_tool_reference_text(tools_with_reference):
+    """
+    Builds the full text content for tool-reference.md.
+    Each tool gets a ## heading followed by its reference items as bullets.
+    """
+    lines = []
+    lines.append("<!-- Generated by 2-generate.py — do not edit directly -->")
+
+    for current_tool in tools_with_reference:
+        lines.append("")
+        lines.append(f"## {current_tool.name}")
+        for note in current_tool.reference:
+            lines.append(f"- {note}")
+
+    return "\n".join(lines)
+
+
+def write_tool_reference(tools):
+    """
+    Filters tools that have reference entries, builds the markdown content,
+    and writes it to tool-reference.md.
+    """
+    tools_with_reference = []
+    for current_tool in tools:
+        if current_tool.reference:
+            tools_with_reference.append(current_tool)
+
+    tool_reference_text = build_tool_reference_text(tools_with_reference)
+    write_text_file("tool-reference.md", tool_reference_text)
+
+    print(f"Wrote: tool-reference.md ({len(tools_with_reference)} tools)")
+
+
+# ─── Summarize ────────────────────────────────────────────────────────────────
+#
+# Group tools by backend and print a tidy table.
+# The :<20 and :<30 inside the f-string are column width specifiers —
+# they pad the value with spaces so everything lines up into columns.
+
+def print_summary(tools):
+    """
+    Prints a human-readable table of all tools, grouped by backend.
+    """
+    print()
+    print(f"cutekit — {len(tools)} tools")
+    print("=" * 55)
+
+    # Build a dict that groups tools by backend: { "apt": [tool, tool], ... }
+    groups = {}
+    for tool in tools:
+        if tool.backend not in groups:
+            groups[tool.backend] = []
+        groups[tool.backend].append(tool)
+
+    # Print one section per backend, in alphabetical order
+    for backend in sorted(groups):
+        print(f"\n  [{backend}]")
+
+        for tool in groups[backend]:
+
+            # Show the install identifier appropriate for this backend
+            if backend == "apt":
+                detail = tool.package or ""
+            else:
+                detail = tool.source or ""
+
+            # Collect which optional metadata fields are present as short flags
+            flags = []
+            if tool.shell_setup:  flags.append("shell")
+            if tool.post_install: flags.append("post_install")
+            if tool.reference:    flags.append("ref")
+            if tool.apt_deps:     flags.append("apt_deps")
+            if tool.expose:       flags.append("expose")
+
+            # Only show the bracket if there are flags to show
+            if flags:
+                flag_str = "  [" + ", ".join(flags) + "]"
+            else:
+                flag_str = ""
+
+            print(f"    {tool.name:<20} {detail:<30}{flag_str}")
+
+    print()
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+#
+# This is the entry point. It runs all steps in order and passes data
+# from each step to the next.
+
+def main():
+    # Accept an optional filename argument; fall back to the default config
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    else:
+        config_file = "1-config.yaml"
+
+    print(f"Reading: {config_file}")
+
+    # Step 1 — Load raw YAML into a Python dict
+    config = load_yaml(config_file)
+
+    # Step 2 — Get the tools list out of the top-level dict
+    raw_tools = config.get("tools")
+    if not raw_tools:
+        print("Error: No 'tools:' list found in config.")
+        sys.exit(1)
+
+    # Step 3 — Convert raw dicts into Tool objects
+    tools = parse_tools(raw_tools)
+
+    # Step 4 — Check for problems and report them
+    warnings = validate(tools)
+    if warnings:
+        print(f"\n  Warnings ({len(warnings)}):")
+        for warning in warnings:
+            print(warning)
+
+    # Step 5 — Print the summary table
+    print_summary(tools)
+
+    # Step 6 — Write mise.toml for all mise-managed tools
+    write_mise_toml(tools)
+
+    # Step 7 — Write 3-setup.sh for apt and curl tools
+    write_setup_sh(tools)
+
+    # Step 8 — Write .zshrc.setup for tools with shell_setup blocks
+    write_zshrc_setup(tools, config)
+
+    # Step 9 — Write 4-post-install-steps.md
+    write_post_install(tools)
+
+    # Step 10 — Write tool-reference.md
+    write_tool_reference(tools)
+
+
+if __name__ == "__main__":
+    main()
