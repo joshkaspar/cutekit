@@ -6,7 +6,7 @@ Bootstrap script for building an Ubuntu 24.04.x “TUI workbench” with an SSH-
 
 ### Generator rewrite (`2-generate.py`)
 - [x] M1: Load and validate `1-config.yaml`, print tool summary
-- [x] M2: Generate `mise.toml` from mise-backend tools
+- [x] M2: Generate `~/.config/mise/config.toml` from mise-backend tools
 - [x] M3: Generate `3-setup.sh` (apt installs + curl manual installers)
 - [x] M4: Generate `.zshrc.setup` from `shell_setup` fields
 - [x] M5: Generate `4-post-install-steps.md` and `tool-reference.md`

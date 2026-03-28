@@ -1,99 +1,217 @@
 # CUTEkit tool config
 #
-# Each item under `tools:` is a single tool (aka app, package), so they are organized by tool (rather than method of install)
-# 
+# Single source of truth for all tools. Edit this file, then run:
+#   python3 2-generate.py
 #
-# Install model:
-# - backend: apt
-#     Installed with `apt install`
-#     Use `package`
-# - any other backend
-#     Written to `mise.toml` and installed by mise
-#     Use `source` if you have a specific source you want to pull from
-#
-# These files are also generated and are *overwritten* if they exist:
-# - post_install -> goes to 4-post-install-steps.md
-# - reference    -> goes to tool-reference.md
-# - shell_setup  _> goes to zshrc.setup
+# Generated files (do not edit directly):
+#   3-setup.sh                        — apt installs and curl-based installers
+#   ~/.config/mise/config.toml        — all mise-managed tools
+#   .zshrc.setup                      — shell init snippets (source this from your .zshrc)
+#   4-post-install-steps.md
+#   tool-reference.md
 
 shell:
   family: zsh
   setup_file: .zshrc.setup
 
 tools:
+
+  # ── Bootstrap ──────────────────────────────────────────────────────────────
+  # mise must be first: it installs everything in the aqua/github/cargo/etc sections.
+
+  - name: mise
+    backend: apt
+    package: mise
+    installed_check: "mise ls"
+    custom_setup: |
+      sudo install -dm 755 /etc/apt/keyrings
+      curl -fsSL https://mise.jdx.dev/gpg-key.pub | sudo tee /etc/apt/keyrings/mise-archive-keyring.asc 1> /dev/null
+      echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.jdx.dev/deb stable main" | sudo tee /etc/apt/sources.list.d/mise.list
+    reference:
+      - Installed via the official mise apt repo, not the Ubuntu default
+      - Must be installed before any mise-managed tools are set up
+
+  # ── System packages ────────────────────────────────────────────────────────
+
+  - name: ca-certificates
+    backend: apt
+    package: ca-certificates
+
+  - name: curl
+    backend: apt
+    package: curl
+
+  - name: wget
+    backend: apt
+    package: wget
+
   - name: git
     backend: apt
     package: git
     post_install:
-      - Set user.name and user.email
-    reference:
-      - Used for cloning repos and version control
+      - Set your identity: git config --global user.name "Your Name"
+      - Set your identity: git config --global user.email "you@example.com"
 
-  - name: openssh
+  - name: unzip
     backend: apt
-    package: openssh-client
-    post_install:
-      - Generate an SSH key if needed
-      - Add the public key to GitHub
-    reference:
-      - Needed for SSH-based Git operations
+    package: unzip
 
-  - name: yazi
-    backend: github
-    source: sxyazi/yazi
+  - name: xz-utils
+    backend: apt
+    package: xz-utils
+
+  - name: jq
+    backend: apt
+    package: jq
+    reference:
+      - JSON processor — useful in scripts for parsing API responses
+
+  - name: gnupg
+    backend: apt
+    package: gnupg
+
+  - name: build-essential
+    backend: apt
+    package: build-essential
+
+  - name: zsh
+    backend: apt
+    package: zsh
+
+  - name: csh
+    backend: apt
+    package: csh
+    post_install:
+      - Set zsh as your default shell: chsh -s $(which zsh)
+      - Re-login or run `exec zsh` to activate it
+
+  - name: mc
+    backend: apt
+    package: mc
+    reference:
+      - Midnight Commander — two-pane terminal file manager
+
+  - name: btop
+    backend: apt
+    package: btop
+    reference:
+      - Resource monitor with a clean TUI
+
+  - name: ripgrep
+    backend: apt
+    package: ripgrep
+    reference:
+      - Fast recursive search; command is `rg`
+
+  - name: bat
+    backend: apt
+    package: bat
+    post_install:
+      - Ubuntu installs bat as `batcat` — create a symlink to use it as `bat`
+      - Run: mkdir -p ~/.local/bin && ln -sf /usr/bin/batcat ~/.local/bin/bat
+    reference:
+      - cat replacement with syntax highlighting; installed as `batcat` on Ubuntu
+
+  - name: git-delta
+    backend: apt
+    package: git-delta
+    reference:
+      - Syntax-highlighted diffs for git; configure in ~/.gitconfig
+
+  - name: visidata
+    backend: apt
+    package: visidata
+    reference:
+      - Terminal spreadsheet and CSV/JSON explorer; command is `vd`
+
+  - name: openssh-server
+    backend: apt
+    package: openssh-server
+    post_install:
+      - After confirming key-based login works, disable password auth
+      - Create /etc/ssh/sshd_config.d/99-hardening.conf and add PasswordAuthentication no
+      - Then reload: sudo systemctl reload ssh
+    reference:
+      - Required for the SSH-first workflow
+
+  - name: qemu-guest-agent
+    backend: apt
+    package: qemu-guest-agent
+    reference:
+      - Required when running as a QEMU/KVM virtual machine; safe to skip on bare metal
+
+  # ── TUI tools (via mise) ───────────────────────────────────────────────────
+
+  - name: gh
+    version: latest
+    post_install:
+      - Authenticate: gh auth login
+      - Wire up git credentials: gh auth setup-git
+
+  - name: glow
     version: latest
     reference:
-      - Installs both `yazi` and `ya`
-
-  - name: nnn
-    backend: github
-    source: jarun/nnn
-    version: latest
-    post_install:
-      - The installed binary is named nnn-emoji-static, not nnn
-      - 'Run: ln -sf ~/.local/share/mise/installs/github-jarun-nnn/<version>/nnn-emoji-static ~/.local/bin/nnn'
-    reference:
-      - Release asset name does not match the expected command name, linked to ~/.local/bin/nnn
+      - Markdown renderer for the terminal
 
   - name: fzf
-    backend: aqua
-    source: junegunn/fzf
     version: latest
     shell_setup:
       - 'source <(fzf --zsh)'
+    reference:
+      - Fuzzy finder; required by navi
 
-  - name: github-cli
-    backend: aqua
-    source: cli/cli
+  - name: navi
     version: latest
+    shell_setup:
+      - 'eval "$(navi widget zsh)"'
+    reference:
+      - Interactive cheatsheet tool — requires fzf
+
+  - name: zellij
+    version: latest
+    shell_setup:
+      - 'eval "$(zellij setup --generate-auto-start zsh)"'
     post_install:
-      - Run `gh auth login`
+      - Zellij will autostart on SSH login once .zshrc.setup is sourced
+      - To enable the web terminal, add to ~/.config/zellij/config.kdl: start_web_server true
+      - Or enable it from the session manager (Ctrl o + s)
+      - Create a login token (shown once — save it): zellij web --create-token
+      - Point your reverse proxy at http://localhost:8082
+    reference:
+      - Terminal multiplexer — preferred over tmux
 
-  - name: wrangler
-    backend: npm
-    source: wrangler
+  - name: lazygit
     version: latest
+    reference:
+      - Terminal UI for git
 
-  - name: gemini-cli
-    backend: npm
-    source: "@google/gemini-cli"
+  - name: atuin
     version: latest
+    shell_setup:
+      - 'eval "$(atuin init zsh)"'
+    reference:
+      - Shell history sync and search — replaces Ctrl+R
 
-  - name: codex
-    backend: npm
-    source: "@openai/codex"
+  - name: micro
     version: latest
-    post_install:
-      - Set `OPENAI_API_KEY`, or run `codex` and follow prompts
+    reference:
+      - Terminal text editor with familiar keybindings (Ctrl+S, Ctrl+C, etc.)
+
+  - name: yazi
+    version: latest
+    reference:
+      - Terminal file manager with image previews
+
+  # ── Curl installers ────────────────────────────────────────────────────────
 
   - name: zoxide
     backend: curl
     url: https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh
-    installed_check: command -v zoxide
+    installed_check: "command -v zoxide"
     shell_setup:
       - 'eval "$(zoxide init zsh)"'
     reference:
-      - Smarter cd command; use `z` to jump to frequented directories
+      - Smarter cd — use `z` to jump to frequently visited directories
 
   - name: pyenv
     backend: curl
@@ -113,15 +231,33 @@ tools:
       - 'export PYENV_ROOT="$HOME/.pyenv"'
       - '[[ -d "$PYENV_ROOT/bin" ]] && export PATH="$PYENV_ROOT/bin:$PATH"'
       - 'eval "$(pyenv init - zsh)"'
+      - 'if [[ -d "$PYENV_ROOT/plugins/pyenv-virtualenv" ]]; then eval "$(pyenv virtualenv-init -)"; fi'
     reference:
-      - Python version manager installed into `~/.pyenv`
+      - Python version manager installed into ~/.pyenv
 
-  - name: jless
-    backend: cargo
-    source: jless
-    version: latest
+  # ── AI tools (commented out — uncomment to enable) ────────────────────────
 
-  - name: watchexec
-    backend: cargo
-    source: watchexec-cli
-    version: latest
+  # - name: claude
+  #   backend: curl
+  #   url: https://claude.ai/install.sh
+  #   installed_check: 'command -v claude || [ -x "$HOME/.local/bin/claude" ]'
+  #   post_install:
+  #     - Run `claude` and follow the prompts to authenticate
+  #   reference:
+  #     - Claude Code CLI — self-updates, no separate maintenance step needed
+
+  # Note: codex and gemini are npm packages — mise handles Node automatically.
+
+  # - name: codex
+  #   backend: npm
+  #   source: "@openai/codex"
+  #   version: latest
+  #   post_install:
+  #     - Set OPENAI_API_KEY in your shell, or run `codex` and follow prompts
+
+  # - name: gemini
+  #   backend: npm
+  #   source: "@google/gemini-cli"
+  #   version: latest
+  #   post_install:
+  #     - Run `gemini` and follow the prompts to authenticate

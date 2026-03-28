@@ -15,15 +15,36 @@ if ! command -v sudo >/dev/null 2>&1; then
     echo "sudo is required but was not found."
     exit 1
 fi
-if ! command -v curl >/dev/null 2>&1; then
-    echo "curl is required but was not found."
-    exit 1
+
+log "Bootstrapping prerequisites..."
+sudo apt-get update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
+ok "Prerequisites ready"
+
+log "Configuring custom repositories..."
+
+# mise
+if ! mise ls > /dev/null 2>&1; then
+    sudo install -dm 755 /etc/apt/keyrings
+    curl -fsSL https://mise.jdx.dev/gpg-key.pub | sudo tee /etc/apt/keyrings/mise-archive-keyring.asc 1> /dev/null
+    echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.jdx.dev/deb stable main" | sudo tee /etc/apt/sources.list.d/mise.list
 fi
+
+ok "Custom repositories configured"
 
 log "Installing apt packages..."
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    bat \
+    btop \
+    build-essential \
+    ca-certificates \
+    csh \
+    curl \
     git \
+    git-delta \
+    gnupg \
+    jq \
     libbz2-dev \
     libffi-dev \
     liblzma-dev \
@@ -31,10 +52,23 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libreadline-dev \
     libsqlite3-dev \
     libssl-dev \
-    openssh-client \
+    mc \
+    mise \
+    openssh-server \
+    qemu-guest-agent \
+    ripgrep \
     tk-dev \
-    zlib1g-dev
+    unzip \
+    visidata \
+    wget \
+    xz-utils \
+    zlib1g-dev \
+    zsh
 ok "apt packages installed"
+
+log "Installing mise-managed tools..."
+mise install
+ok "mise tools installed"
 
 if command -v zoxide > /dev/null 2>&1; then
     log "zoxide already installed — to update, see the tool's own documentation"

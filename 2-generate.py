@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """
 2-generate.py — cutekit config generator
-Milestone 3: Read the config, print a summary, write mise.toml, and write 3-setup.sh.
+Reads 1-config.yaml and generates all output files directly on the target machine.
 
-Usage:
+Normal usage (run this on the machine you are setting up):
   python3 2-generate.py                    # reads 1-config.yaml
   python3 2-generate.py new-config.yaml   # reads a different file
+
+Alternative: generate on a different machine, then transfer
+  If Python cannot run on the target machine, you can run this script
+  elsewhere and copy the generated files over before running 3-setup.sh.
+
+  WARNING: This path is intended only for cases where the Python script
+  cannot run directly on the target. Review 3-setup.sh carefully before
+  running it, and note that some features (e.g. mise config written to
+  ~/.config/mise/config.toml) will reflect the generating machine's home
+  directory rather than the target's. Some steps may behave differently
+  than running the script directly on the target machine.
 """
 
 import sys
@@ -40,9 +51,10 @@ class Tool:
     post_install: list          = field(default_factory=list)  # Actionable steps
     reference:    list          = field(default_factory=list)  # Background notes
     apt_deps:     list          = field(default_factory=list)  # Extra apt prereqs
-    installed_check: Optional[str] = None    # curl only — bash expression to detect existing install
+    installed_check: Optional[str] = None    # Bash expression to detect an existing install; skips setup if true
     expose:       Optional[dict] = None      # Binary rename: {installed_binary, as}
     url:          Optional[str] = None       # curl backend: the URL to pipe to bash
+    custom_setup: Optional[str] = None       # apt backend: bash commands to run before apt (e.g. adding a GPG key)
 
 
 # ─── Load ─────────────────────────────────────────────────────────────────────
@@ -90,7 +102,7 @@ def parse_tools(list_from_yaml):
     for tool_dictionary in list_from_yaml:
         processed_tool = Tool(
             name         = tool_dictionary.get("name",         "<unnamed>"),
-            backend      = tool_dictionary.get("backend",      "<missing>"),
+            backend      = tool_dictionary.get("backend",      "mise"),
             package      = tool_dictionary.get("package"),
             source       = tool_dictionary.get("source"),
             version      = tool_dictionary.get("version"),
@@ -101,6 +113,7 @@ def parse_tools(list_from_yaml):
             installed_check = tool_dictionary.get("installed_check"),
             expose       = tool_dictionary.get("expose"),
             url          = tool_dictionary.get("url"),
+            custom_setup = tool_dictionary.get("custom_setup"),
         )
 
         tools.append(processed_tool)
@@ -116,7 +129,7 @@ def parse_tools(list_from_yaml):
 
 # Every backend except 'apt' and 'curl' is managed by mise.
 # This constant is referenced by both validate() and get_mise_tools() below.
-MISE_BACKENDS = {"aqua", "github", "gitlab", "npm", "pipx", "cargo", "go", "asdf"}
+MISE_BACKENDS = {"mise", "aqua", "github", "gitlab", "npm", "pipx", "cargo", "go", "asdf"}
 
 def validate(tools):
     """
@@ -127,13 +140,10 @@ def validate(tools):
     warnings = []
 
     for tool in tools:
-        if tool.backend == "<missing>":
-            warnings.append(f"  [{tool.name}] Missing required field: 'backend'")
-
-        elif tool.backend == "apt" and not tool.package:
+        if tool.backend == "apt" and not tool.package:
             warnings.append(f"  [{tool.name}] backend 'apt' requires a 'package' field")
 
-        elif tool.backend in MISE_BACKENDS and not tool.source:
+        elif tool.backend in MISE_BACKENDS and tool.backend != "mise" and not tool.source:
             warnings.append(f"  [{tool.name}] backend '{tool.backend}' should have a 'source' field")
 
         elif tool.backend == "curl" and not tool.url:
@@ -168,25 +178,35 @@ def get_mise_tools(tools):
 
 def build_mise_plugin_name(tool):
     """
-    Converts one Tool object into the plugin identifier mise expects.
+    Converts one Tool object into the key mise expects in config.toml.
 
     Examples:
-      backend=aqua,   source=junegunn/fzf      -> aqua:junegunn/fzf
-      backend=github, source=sxyazi/yazi       -> github:sxyazi/yazi
-      backend=npm,    source=@openai/codex     -> npm:@openai/codex
+      backend=mise                             -> fzf  (registry lookup by name)
+      backend=aqua,   source=cli/cli          -> aqua:cli/cli
+      backend=npm,    source=@openai/codex    -> npm:@openai/codex
     """
+    if tool.backend == "mise":
+        return tool.name
     return f"{tool.backend}:{tool.source}"
 
 
 def build_mise_toml_text(mise_tools):
     """
-    Builds the full text content for mise.toml from a list of mise-managed tools.
+    Builds the full text content for ~/.config/mise/config.toml from a list of
+    mise-managed tools.
     """
     lines = []
 
     # This header makes it obvious the file should not be edited by hand.
     lines.append("# Generated by 2-generate.py")
     lines.append("")
+
+    # [settings] must appear before [tools] so TOML parses it as a top-level
+    # section rather than a subtable of [tools].
+    lines.append("[settings]")
+    lines.append("lockfile = true")
+    lines.append("")
+
     lines.append("[tools]")
 
     # Sort by plugin name so the output is stable and easy to diff across runs.
@@ -199,7 +219,12 @@ def build_mise_toml_text(mise_tools):
         # In Python, `x or y` returns y when x is None or empty.
         tool_version = tool.version or "latest"
 
-        lines.append(f'"{plugin_name}" = "{tool_version}"')
+        if ":" in plugin_name:
+            # Explicit backend required — tool is not available by short name in
+            # the mise registry and must be addressed via its full backend:source path.
+            lines.append(f'"{plugin_name}" = "{tool_version}"')
+        else:
+            lines.append(f'{plugin_name} = "{tool_version}"')
 
     lines.append("")
 
@@ -216,13 +241,18 @@ def write_text_file(filepath, text):
 
 def write_mise_toml(tools):
     """
-    Filters mise-managed tools, converts them into TOML, and writes mise.toml.
+    Filters mise-managed tools, converts them into TOML, and writes
+    ~/.config/mise/config.toml (creating the directory if needed).
     """
     mise_tools = get_mise_tools(tools)
     mise_toml_text = build_mise_toml_text(mise_tools)
-    write_text_file("mise.toml", mise_toml_text)
 
-    print(f"Wrote: mise.toml ({len(mise_tools)} tools)")
+    mise_config_dir = os.path.expanduser("~/.config/mise")
+    os.makedirs(mise_config_dir, exist_ok=True)
+    config_path = os.path.join(mise_config_dir, "config.toml")
+    write_text_file(config_path, mise_toml_text)
+
+    print(f"Wrote: {config_path} ({len(mise_tools)} tools)")
 
 
 # ─── M3: Build 3-setup.sh ────────────────────────────────────────────────────
@@ -236,10 +266,26 @@ def write_mise_toml(tools):
 # mise handles those after this script runs.
 #
 # Each concern has its own function, same pattern as the mise section above:
-#   get_apt_packages()    — collect all apt package names
-#   get_curl_tools()      — filter curl-backend tools
-#   build_setup_sh_text() — assemble the full script content
-#   write_setup_sh()      — orchestrate and write the file
+#   get_custom_setup_tools() — filter apt tools that need pre-apt commands
+#   get_apt_packages()       — collect all apt package names
+#   get_curl_tools()         — filter curl-backend tools
+#   build_setup_sh_text()    — assemble the full script content
+#   write_setup_sh()         — orchestrate and write the file
+
+def get_custom_setup_tools(tools):
+    """
+    Returns only the apt tools that have a custom_setup block.
+    These need special commands (like adding a GPG key or apt source) to run
+    before apt can find and install the package.
+    """
+    custom_setup_tools = []
+
+    for tool in tools:
+        if tool.backend == "apt" and tool.custom_setup:
+            custom_setup_tools.append(tool)
+
+    return custom_setup_tools
+
 
 def get_apt_packages(tools):
     """
@@ -277,10 +323,16 @@ def get_curl_tools(tools):
     return curl_tools
 
 
-def build_setup_sh_text(apt_packages, curl_tools):
+def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
     """
     Builds the full text content for 3-setup.sh.
     Accepts pre-filtered lists so this function only has to format, not filter.
+
+    Script sections run in this order:
+      0. Custom repository setup  — GPG keys and apt sources (before apt update)
+      1. apt packages             — one combined install call
+      2. mise tools               — `mise install` from the project directory
+      3. curl installers          — one block per tool
     """
     lines = []
 
@@ -307,11 +359,54 @@ def build_setup_sh_text(apt_packages, curl_tools):
     lines.append('    echo "sudo is required but was not found."')
     lines.append("    exit 1")
     lines.append("fi")
-    lines.append('if ! command -v curl >/dev/null 2>&1; then')
-    lines.append('    echo "curl is required but was not found."')
-    lines.append("    exit 1")
-    lines.append("fi")
     lines.append("")
+
+    # Bootstrap apt — curl and ca-certificates must be present before anything
+    # else runs. Custom repository setup (Section 0) uses curl to fetch GPG keys,
+    # so these two packages have to be installed first, separately from the main
+    # apt block.
+    lines.append('log "Bootstrapping prerequisites..."')
+    lines.append("sudo apt-get update -qq")
+    lines.append("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates")
+    lines.append('ok "Prerequisites ready"')
+    lines.append("")
+
+    # ── Section 0: Custom repository setup ───────────────────────────────────
+    # Some apt tools (like mise) need a GPG key and a custom apt source added
+    # before `apt install` can find them. Those commands live here, between
+    # the bootstrap apt-get update and the main one — so the newly added sources
+    # are picked up when the main apt block runs its own apt-get update.
+    #
+    # Each block is wrapped in the tool's installed_check guard so that
+    # re-running the script on an already-configured machine doesn't add
+    # duplicate keys or sources.
+    if custom_setup_tools:
+        lines.append('log "Configuring custom repositories..."')
+        lines.append("")
+
+        for tool in custom_setup_tools:
+            lines.append(f"# {tool.name}")
+
+            if tool.installed_check:
+                # Only run setup if the tool is not already installed.
+                lines.append(f"if ! {tool.installed_check} > /dev/null 2>&1; then")
+
+                # Each line of custom_setup is indented inside the if block.
+                # .strip() removes any leading/trailing blank lines from the YAML block.
+                # .splitlines() breaks the multiline string into individual lines.
+                for setup_line in tool.custom_setup.strip().splitlines():
+                    lines.append(f"    {setup_line}")
+
+                lines.append("fi")
+            else:
+                # No guard — always run the setup commands.
+                for setup_line in tool.custom_setup.strip().splitlines():
+                    lines.append(setup_line)
+
+            lines.append("")
+
+        lines.append('ok "Custom repositories configured"')
+        lines.append("")
 
     # ── Section 1: apt ────────────────────────────────────────────────────────
     # One combined install call covers both apt-backend tools and apt_deps.
@@ -332,7 +427,17 @@ def build_setup_sh_text(apt_packages, curl_tools):
         lines.append('ok "apt packages installed"')
         lines.append("")
 
-    # ── Section 2: curl installers ────────────────────────────────────────────
+    # ── Section 2: mise tools ─────────────────────────────────────────────────
+    # mise is now installed (from the apt section above).
+    # `mise install` reads mise.toml in the current directory and installs every
+    # tool declared there into ~/.local/share/mise — available globally.
+    # If there are no mise tools, this is a fast no-op.
+    lines.append('log "Installing mise-managed tools..."')
+    lines.append("mise install")
+    lines.append('ok "mise tools installed"')
+    lines.append("")
+
+    # ── Section 3: curl installers ────────────────────────────────────────────
     for tool in curl_tools:
         if tool.installed_check:
             # If the tool is already present, skip the curl install entirely and
@@ -357,20 +462,21 @@ def build_setup_sh_text(apt_packages, curl_tools):
 
 def write_setup_sh(tools):
     """
-    Filters apt packages and curl tools, builds the script, and writes 3-setup.sh.
+    Filters all three tool categories, builds the script, and writes 3-setup.sh.
     Filtering happens here so the counts are available for both the file content
     and the confirmation message, without running the filters twice.
     """
+    custom_setup_tools = get_custom_setup_tools(tools)
     apt_packages = get_apt_packages(tools)
     curl_tools = get_curl_tools(tools)
 
-    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools)
+    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools)
     write_text_file("3-setup.sh", setup_sh_text)
 
     current_mode = os.stat("3-setup.sh").st_mode
     os.chmod("3-setup.sh", current_mode | stat.S_IEXEC)
 
-    print(f"Wrote: 3-setup.sh ({len(apt_packages)} apt packages, {len(curl_tools)} curl installers)")
+    print(f"Wrote: 3-setup.sh ({len(custom_setup_tools)} custom repos, {len(apt_packages)} apt packages, {len(curl_tools)} curl installers)")
 
 
 # ─── .zshrc.setup ─────────────────────────────────────────────────────────────
