@@ -13,7 +13,7 @@ Bootstrap script for building an Ubuntu 24.04.x “TUI workbench” with an SSH-
 
 ### Tools and environment
 - [x] Break post-bootstrap output into `do-this-first.md` (SSH hardening, zellij web setup) and `app-reference.md` (per-tool auth/setup steps); print a message at end of script explaining what each file is for
-- [ ] Add a 'real' editor like Helix or Micro
+- [x] Add a 'real' editor like Helix or Micro
 - [ ] Add chezmoi
 - [ ] move environment to VPS
 - [ ] implement cert and reverse proxy (caddy)

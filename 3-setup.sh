@@ -85,3 +85,7 @@ else
     curl -fsSL https://pyenv.run | bash
     ok "pyenv installed"
 fi
+
+log "Setup complete!"
+echo ""
+echo "Next: open 4-post-install-steps.md for manual configuration steps."

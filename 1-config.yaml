@@ -16,6 +16,73 @@ shell:
 
 tools:
 
+  # ══ EXAMPLES ═════════════════════════════════════════════════════════════════
+  #
+  # Keys shared by every backend:
+  #   name          REQUIRED  human-friendly label (used in headings and messages only)
+  #   backend       REQUIRED  how the tool is installed
+  #   shell_setup   optional  list of lines written to .zshrc.setup
+  #   post_install  optional  list of actionable steps written to 4-post-install-steps.md
+  #   reference     optional  list of background notes written to tool-reference.md
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── backend: apt ─────────────────────────────────────────────────────────
+  # Use for anything available in the Ubuntu apt repository, intended for system tools.
+  #
+  # - name: some-system-tool      # REQUIRED  display label
+  #   backend: apt                # initiates apt install
+  #   package: some-system-tool   # REQUIRED  exact apt package name
+  #   installed_check: "some-system-tool --version"
+  #                               # optional  bash expression; setup is skipped if it exits 0
+  #   custom_setup: |             # optional  runs before apt-get install
+  #     sudo install -dm 755 /etc/apt/keyrings        #   use this to add a GPG key
+  #     curl -fsSL https://example.com/key | ...      #   and a custom apt source
+  #   apt_deps:                   # optional  extra apt packages installed before this tool
+  #     - libssl-dev
+
+  # ── backend: mise (registry lookup) ──────────────────────────────────────
+  # Use for tools listed in the mise registry (https://mise.jdx.dev/registry.html).
+  # `name` is used as the registry key — no `source` field needed.
+  #
+  # - name: some-tui-tool         # REQUIRED  must match the mise registry name exactly
+  #   version: latest             # REQUIRED  "latest", "lts", or a pinned version like "1.2.3"
+
+  # ── backend: github (via mise) ────────────────────────────────────────────
+  # Downloads a release binary directly from a GitHub repo.
+  # Use when the tool is not in the mise registry and mise will attempt to find a release binary.
+  #
+  # - name: some-github-tool      # REQUIRED  display label
+  #   backend: github             # REQUIRED
+  #   source: owner/repo          # REQUIRED  GitHub owner/repo (e.g. BurntSushi/ripgrep)
+  #   version: latest             # REQUIRED
+
+  # ── backend: npm ──────────────────────────────────────────────────────────
+  # Installs a Node.js package globally via npm (managed by mise).
+  # Requires the node entry below to be present in this config.
+  #
+  # - name: some-npm-tool         # REQUIRED  display label
+  #   backend: npm                # REQUIRED
+  #   source: "@scope/package"    # REQUIRED  npm package name, quoted if it starts with @
+  #   version: latest             # REQUIRED
+
+  # ── backend: curl ─────────────────────────────────────────────────────────
+  # Last resort: pipes a remote script to bash (curl | bash).
+  # Use only when no other backend can install the tool.
+  #
+  # - name: some-curl-tool        # REQUIRED  display label
+  #   backend: curl               # REQUIRED
+  #   url: https://example.com/install.sh   # REQUIRED  piped directly to bash
+  #   installed_check: 'command -v some-curl-tool'
+  #                               # optional but strongly recommended — skips re-install
+  #   apt_deps:                   # optional  installed via apt before the curl command runs
+  #     - some-apt-dep
+  #   shell_setup:                # optional  commonly needed to add the tool to PATH
+  #     - 'export PATH="$HOME/.some-curl-tool/bin:$PATH"'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # END EXAMPLES
+  # ════════════════════════════════════════════════════════════════════════════
+
   # ── Bootstrap ──────────────────────────────────────────────────────────────
   # mise must be first: it installs everything in the aqua/github/cargo/etc sections.
 
@@ -27,9 +94,10 @@ tools:
       sudo install -dm 755 /etc/apt/keyrings
       curl -fsSL https://mise.jdx.dev/gpg-key.pub | sudo tee /etc/apt/keyrings/mise-archive-keyring.asc 1> /dev/null
       echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.jdx.dev/deb stable main" | sudo tee /etc/apt/sources.list.d/mise.list
-    reference:
-      - Installed via the official mise apt repo, not the Ubuntu default
-      - Must be installed before any mise-managed tools are set up
+    shell_setup:
+      - 'eval "$(mise activate zsh)"'
+    post_install:
+      - 'For login shells (e.g. SSH sessions), add to ~/.zprofile: eval "$(mise activate zsh --shims)"'
 
   # ── System packages ────────────────────────────────────────────────────────
 
@@ -48,7 +116,7 @@ tools:
   - name: git
     backend: apt
     package: git
-    post_install:
+    reference:
       - Set your identity: git config --global user.name "Your Name"
       - Set your identity: git config --global user.email "you@example.com"
 
@@ -82,8 +150,7 @@ tools:
     backend: apt
     package: csh
     post_install:
-      - Set zsh as your default shell: chsh -s $(which zsh)
-      - Re-login or run `exec zsh` to activate it
+      - log out and back in again for zsh to become your active shell
 
   - name: mc
     backend: apt
@@ -142,6 +209,9 @@ tools:
 
   # ── TUI tools (via mise) ───────────────────────────────────────────────────
 
+  - name: node
+    version: lts
+
   - name: gh
     version: latest
     post_install:
@@ -193,6 +263,8 @@ tools:
       - Shell history sync and search — replaces Ctrl+R
 
   - name: micro
+    backend: aqua
+    source: zyedidia/micro
     version: latest
     reference:
       - Terminal text editor with familiar keybindings (Ctrl+S, Ctrl+C, etc.)
