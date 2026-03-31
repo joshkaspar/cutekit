@@ -229,9 +229,6 @@ tools:
 
   # ── TUI tools (via mise) ───────────────────────────────────────────────────
 
-  - name: node
-    version: lts
-
   - name: gh
     version: latest
     reference:
@@ -352,7 +349,31 @@ tools:
       - 'Create /etc/ssh/sshd_config.d/99-hardening.conf and add: PasswordAuthentication no'
       - 'Reload sshd: sudo systemctl reload ssh'
 
-  # ── AI tools (commented out — uncomment to enable) ────────────────────────
+# ── Optional runtimes (required for certain backends) ──────────────────────
+  # Uncomment the runtime for any backend you plan to use.
+
+# Uncomment if you use the npm backend
+  - name: node
+    version: lts
+  
+  # Uncomment if you use the cargo backend
+  - name: rust
+    version: latest
+
+  # Uncomment if you use the go backend
+  # - name: go
+  #   version: latest
+
+  # Uncomment if you use the gem backend
+  # - name: ruby
+  #   version: latest
+
+  # Uncomment if you use the pipx backend
+  # - name: uv
+  #   version: latest
+
+
+  # ── AI tools (uncomment to enable) ────────────────────────
 
   # - name: claude
   #   backend: curl
