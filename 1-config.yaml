@@ -355,7 +355,7 @@ tools:
 # Uncomment if you use the npm backend
   - name: node
     version: lts
-  
+
   # Uncomment if you use the cargo backend
   - name: rust
     version: latest
