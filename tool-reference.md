@@ -25,7 +25,6 @@ System packages to be installed via apt:
   - openssh-server
 
 TUI tools to be installed via mise:
-  - node
   - gh
   - glow
   - fzf
@@ -36,6 +35,8 @@ TUI tools to be installed via mise:
   - yazi
   - zoxide
   - zellij
+  - node
+  - rust
 
 ## mise
 - Installed via the official mise apt repo, not the Ubuntu default
