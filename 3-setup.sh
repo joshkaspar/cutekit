@@ -70,14 +70,6 @@ log "Installing mise-managed tools..."
 mise install
 ok "mise tools installed"
 
-if command -v zoxide > /dev/null 2>&1; then
-    log "zoxide already installed — to update, see the tool's own documentation"
-else
-    log "Installing zoxide..."
-    curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
-    ok "zoxide installed"
-fi
-
 if [ -d "$HOME/.pyenv" ] > /dev/null 2>&1; then
     log "pyenv already installed — to update, see the tool's own documentation"
 else
@@ -88,4 +80,7 @@ fi
 
 log "Setup complete!"
 echo ""
-echo "Next: open 4-post-install-steps.md for manual configuration steps."
+echo "Next steps:"
+echo "  4-post-install-steps.md — Review before you start: a few short steps will have the system up and running"
+echo "  tool-reference.md       — reference guide for installed tools"
+echo ""

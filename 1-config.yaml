@@ -13,6 +13,46 @@
 shell:
   family: zsh
   setup_file: .zshrc.setup
+  defaults: |
+    # === ZSH ENVIRONMENT ===
+    # Use this if you don't have a preferred zsh setup
+
+    # Set up the prompt
+    autoload -Uz promptinit
+    promptinit
+    prompt adam1
+
+    setopt histignorealldups sharehistory
+
+    # Use emacs keybindings even if our EDITOR is set to vi
+    #bindkey -e
+
+    # Keep 1000 lines of history within the shell and save it to ~/.zsh_history:
+    HISTSIZE=1000
+    SAVEHIST=1000
+    HISTFILE=~/.zsh_history
+
+    # Use modern completion system
+    autoload -Uz compinit
+    compinit
+
+    zstyle ':completion:*' auto-description 'specify: %d'
+    zstyle ':completion:*' completer _expand _complete _correct _approximate
+    zstyle ':completion:*' format 'Completing %d'
+    zstyle ':completion:*' group-name ''
+    zstyle ':completion:*' menu select=2
+    eval "$(dircolors -b)"
+    zstyle ':completion:*:default' list-colors ${(s.:.)LS_COLORS}
+    zstyle ':completion:*' list-colors ''
+    zstyle ':completion:*' list-prompt %SAt %p: Hit TAB for more, or the character to insert%s
+    zstyle ':completion:*' matcher-list '' 'm:{a-z}={A-Z}' 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=*'
+    zstyle ':completion:*' menu select=long
+    zstyle ':completion:*' select-prompt %SScrolling active: current selection at %p%s
+    zstyle ':completion:*' use-compctl false
+    zstyle ':completion:*' verbose true
+
+    zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#)*=0=01;31'
+    zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
 
 tools:
 
@@ -96,7 +136,9 @@ tools:
       echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.jdx.dev/deb stable main" | sudo tee /etc/apt/sources.list.d/mise.list
     shell_setup:
       - 'eval "$(mise activate zsh)"'
-    post_install:
+    reference:
+      - Installed via the official mise apt repo, not the Ubuntu default
+      - Must be installed before any mise-managed tools are set up
       - 'For login shells (e.g. SSH sessions), add to ~/.zprofile: eval "$(mise activate zsh --shims)"'
 
   # ── System packages ────────────────────────────────────────────────────────
@@ -142,16 +184,6 @@ tools:
     backend: apt
     package: build-essential
 
-  - name: zsh
-    backend: apt
-    package: zsh
-
-  - name: csh
-    backend: apt
-    package: csh
-    post_install:
-      - log out and back in again for zsh to become your active shell
-
   - name: mc
     backend: apt
     package: mc
@@ -173,11 +205,9 @@ tools:
   - name: bat
     backend: apt
     package: bat
-    post_install:
-      - Ubuntu installs bat as `batcat` — create a symlink to use it as `bat`
-      - Run: mkdir -p ~/.local/bin && ln -sf /usr/bin/batcat ~/.local/bin/bat
     reference:
-      - cat replacement with syntax highlighting; installed as `batcat` on Ubuntu
+      - 'cat replacement with syntax highlighting; installed as `batcat` on Ubuntu'
+      - 'Create a symlink to use as `bat`: mkdir -p ~/.local/bin && ln -sf /usr/bin/batcat ~/.local/bin/bat'
 
   - name: git-delta
     backend: apt
@@ -190,16 +220,6 @@ tools:
     package: visidata
     reference:
       - Terminal spreadsheet and CSV/JSON explorer; command is `vd`
-
-  - name: openssh-server
-    backend: apt
-    package: openssh-server
-    post_install:
-      - After confirming key-based login works, disable password auth
-      - Create /etc/ssh/sshd_config.d/99-hardening.conf and add PasswordAuthentication no
-      - Then reload: sudo systemctl reload ssh
-    reference:
-      - Required for the SSH-first workflow
 
   - name: qemu-guest-agent
     backend: apt
@@ -214,9 +234,9 @@ tools:
 
   - name: gh
     version: latest
-    post_install:
-      - Authenticate: gh auth login
-      - Wire up git credentials: gh auth setup-git
+    reference:
+      - 'Authenticate after install: gh auth login'
+      - 'Wire up git credentials: gh auth setup-git'
 
   - name: glow
     version: latest
@@ -237,18 +257,6 @@ tools:
     reference:
       - Interactive cheatsheet tool — requires fzf
 
-  - name: zellij
-    version: latest
-    shell_setup:
-      - 'eval "$(zellij setup --generate-auto-start zsh)"'
-    post_install:
-      - Zellij will autostart on SSH login once .zshrc.setup is sourced
-      - To enable the web terminal, add to ~/.config/zellij/config.kdl: start_web_server true
-      - Or enable it from the session manager (Ctrl o + s)
-      - Create a login token (shown once — save it): zellij web --create-token
-      - Point your reverse proxy at http://localhost:8082
-    reference:
-      - Terminal multiplexer — preferred over tmux
 
   - name: lazygit
     version: latest
@@ -277,9 +285,9 @@ tools:
   # ── Curl installers ────────────────────────────────────────────────────────
 
   - name: zoxide
-    backend: curl
-    url: https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh
-    installed_check: "command -v zoxide"
+    backend: cargo
+    source: zoxide
+    version: latest
     shell_setup:
       - 'eval "$(zoxide init zsh)"'
     reference:
@@ -306,6 +314,43 @@ tools:
       - 'if [[ -d "$PYENV_ROOT/plugins/pyenv-virtualenv" ]]; then eval "$(pyenv virtualenv-init -)"; fi'
     reference:
       - Python version manager installed into ~/.pyenv
+
+  # ── Post Install ──────────────────────────────────────────────────────────
+  # These tools have post-install notes and are grouped here in the order
+  # the steps should be performed.
+
+  - name: zsh
+    backend: apt
+    package: zsh
+    post_install:
+      - Configure your shell
+      - 'Fresh install (recommended): cp .zshrc.setup ~/.zshrc'
+      - 'Existing .zshrc: add the REQUIRED TOOL-SPECIFIC ENTRIES section from .zshrc.setup to your config'
+      - 'Set zsh as your default shell: chsh -s $(which zsh)'
+      - Log out and back in for the change to take effect
+
+  - name: csh
+    backend: apt
+    package: csh
+
+  - name: zellij
+    version: latest
+    shell_setup:
+      - 'eval "$(zellij setup --generate-auto-start zsh)"'
+    post_install:
+      - Zellij will autostart on SSH login once .zshrc.setup is sourced
+      - 'To enable the web terminal, add to ~/.config/zellij/config.kdl: start_web_server true'
+      - Or enable it from the session manager (Ctrl o + s)
+      - 'Create a login token (shown once — save it): zellij web --create-token'
+      - Point your reverse proxy at http://localhost:8082
+
+  - name: openssh-server
+    backend: apt
+    package: openssh-server
+    post_install:
+      - After confirming key-based login works, disable password auth
+      - 'Create /etc/ssh/sshd_config.d/99-hardening.conf and add: PasswordAuthentication no'
+      - 'Reload sshd: sudo systemctl reload ssh'
 
   # ── AI tools (commented out — uncomment to enable) ────────────────────────
 
