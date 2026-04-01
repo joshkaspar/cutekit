@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-2-generate.py — cutekit config generator
+2-generate.py — CUTEkit config generator
 Reads 1-config.yaml and generates all output files directly on the target machine.
 
 Normal usage (run this on the machine you are setting up):

@@ -45,38 +45,21 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     git-delta \
     gnupg \
     jq \
-    libbz2-dev \
-    libffi-dev \
-    liblzma-dev \
-    libncursesw5-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    libssl-dev \
     mc \
     mise \
     openssh-server \
     qemu-guest-agent \
     ripgrep \
-    tk-dev \
     unzip \
     visidata \
     wget \
     xz-utils \
-    zlib1g-dev \
     zsh
 ok "apt packages installed"
 
 log "Installing mise-managed tools..."
 mise install
 ok "mise tools installed"
-
-if [ -d "$HOME/.pyenv" ] > /dev/null 2>&1; then
-    log "pyenv already installed — to update, see the tool's own documentation"
-else
-    log "Installing pyenv..."
-    curl -fsSL https://pyenv.run | bash
-    ok "pyenv installed"
-fi
 
 log "Setup complete!"
 echo ""

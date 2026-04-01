@@ -7,6 +7,7 @@ System packages to be installed via apt:
   - ca-certificates
   - curl
   - wget
+  - csh
   - git
   - unzip
   - xz-utils
@@ -21,7 +22,6 @@ System packages to be installed via apt:
   - visidata
   - qemu-guest-agent
   - zsh
-  - csh
   - openssh-server
 
 TUI tools to be installed via mise:
@@ -44,11 +44,11 @@ TUI tools to be installed via mise:
 - For login shells (e.g. SSH sessions), add to ~/.zprofile: eval "$(mise activate zsh --shims)"
 
 ## git
-- {'Set your identity': 'git config --global user.name "Your Name"'}
-- {'Set your identity': 'git config --global user.email "you@example.com"'}
+- Set your name: git config --global user.name "Your Name"
+- Set your email: git config --global user.email "you@example.com"
 
 ## jq
-- JSON processor — useful in scripts for parsing API responses
+- JSON processor - useful in scripts for parsing API responses
 
 ## mc
 - Midnight Commander — two-pane terminal file manager
@@ -83,13 +83,13 @@ TUI tools to be installed via mise:
 - Fuzzy finder; required by navi
 
 ## navi
-- Interactive cheatsheet tool — requires fzf
+- Interactive cheatsheet tool - requires fzf
 
 ## lazygit
 - Terminal UI for git
 
 ## atuin
-- Shell history sync and search — replaces Ctrl+R
+- Shell history sync and search - replaces Ctrl+R
 
 ## micro
 - Terminal text editor with familiar keybindings (Ctrl+S, Ctrl+C, etc.)
@@ -98,7 +98,4 @@ TUI tools to be installed via mise:
 - Terminal file manager with image previews
 
 ## zoxide
-- Smarter cd — use `z` to jump to frequently visited directories
-
-## pyenv
-- Python version manager installed into ~/.pyenv
+- Smarter cd - use `z` to jump to frequently visited directories
