@@ -502,6 +502,10 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_con
     lines.append('cp "$SCRIPT_DIR/.zshrc.setup" "$USER_HOME/.zshrc"')
     lines.append('chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.config"')
     lines.append('chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.zshrc"')
+    lines.append('mkdir -p "$USER_HOME/cutekit"')
+    lines.append('cp "$SCRIPT_DIR/99-lock-doors.sh" "$USER_HOME/cutekit/99-lock-doors.sh"')
+    lines.append('cp "$SCRIPT_DIR/4-post-install-steps.md" "$USER_HOME/cutekit/4-post-install-steps.md"')
+    lines.append('chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/cutekit"')
     lines.append('ok "Configuration files installed"')
     lines.append("")
 
