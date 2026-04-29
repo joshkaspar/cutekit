@@ -3,3 +3,5 @@
 4-post-install-steps.md
 tool-reference.md
 ROADMAP.md
+/99-lock-doors.sh
+/mise.toml

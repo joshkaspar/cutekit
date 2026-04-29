@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
 2-generate.py — CUTEkit config generator
-Reads 1-config.yaml and generates all output files directly on the target machine.
+Reads 1-config.yaml and generates all output files into the current directory.
 
-Normal usage (run this on the machine you are setting up):
+All generated files land here, next to the config:
+  3-setup.sh            — runs as root; creates user, installs packages
+  mise.toml             — mise tool manifest (3-setup.sh moves this into place)
+  .zshrc.setup          — shell init snippets
+  4-post-install-steps.md
+  tool-reference.md
+  99-lock-doors.sh      — SSH hardening (run only after confirming new user login)
+
+Usage:
   python3 2-generate.py                    # reads 1-config.yaml
   python3 2-generate.py new-config.yaml   # reads a different file
-
-Alternative: generate on a different machine, then transfer
-  If Python cannot run on the target machine, you can run this script
-  elsewhere and copy the generated files over before running 3-setup.sh.
-
-  WARNING: This path is intended only for cases where the Python script
-  cannot run directly on the target. Review 3-setup.sh carefully before
-  running it, and note that some features (e.g. mise config written to
-  ~/.config/mise/config.toml) will reflect the generating machine's home
-  directory rather than the target's. Some steps may behave differently
-  than running the script directly on the target machine.
 """
 
 import sys
@@ -192,8 +189,8 @@ def build_mise_plugin_name(tool):
 
 def build_mise_toml_text(mise_tools):
     """
-    Builds the full text content for ~/.config/mise/config.toml from a list of
-    mise-managed tools.
+    Builds the full text content for mise.toml from a list of mise-managed tools.
+    3-setup.sh moves this file into the target user's ~/.config/mise/ directory.
     """
     lines = []
 
@@ -241,18 +238,16 @@ def write_text_file(filepath, text):
 
 def write_mise_toml(tools):
     """
-    Filters mise-managed tools, converts them into TOML, and writes
-    ~/.config/mise/config.toml (creating the directory if needed).
+    Filters mise-managed tools, converts them into TOML, and writes mise.toml
+    into the current (project) directory. 3-setup.sh will move this file into
+    the target user's ~/.config/mise/ directory during setup.
     """
     mise_tools = get_mise_tools(tools)
     mise_toml_text = build_mise_toml_text(mise_tools)
 
-    mise_config_dir = os.path.expanduser("~/.config/mise")
-    os.makedirs(mise_config_dir, exist_ok=True)
-    config_path = os.path.join(mise_config_dir, "config.toml")
-    write_text_file(config_path, mise_toml_text)
+    write_text_file("mise.toml", mise_toml_text)
 
-    print(f"Wrote: {config_path} ({len(mise_tools)} tools)")
+    print(f"Wrote: mise.toml ({len(mise_tools)} tools)")
 
 
 # ─── M3: Build 3-setup.sh ────────────────────────────────────────────────────
@@ -323,16 +318,19 @@ def get_curl_tools(tools):
     return curl_tools
 
 
-def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
+def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config):
     """
     Builds the full text content for 3-setup.sh.
     Accepts pre-filtered lists so this function only has to format, not filter.
+    system_config is the parsed system: section from 1-config.yaml.
 
     Script sections run in this order:
-      0. Custom repository setup  — GPG keys and apt sources (before apt update)
-      1. apt packages             — one combined install call
-      2. mise tools               — `mise install` from the project directory
-      3. curl installers          — one block per tool
+      0.  Custom repository setup  — GPG keys and apt sources (before apt update)
+      1.  apt packages             — one combined install call
+      1.5 User setup               — create user, set shell, copy SSH keys, move config files
+      2.  mise tools               — `mise install` run as the target user
+      3.  curl installers          — one block per tool, run as the target user
+      4.  Two-terminal warning     — safety instructions before SSH hardening
     """
     lines = []
 
@@ -350,14 +348,37 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
     lines.append('ok()  { printf "    \\033[0;32mOK: %s\\033[0m\\n" "$1"; }')
     lines.append("")
 
-    # Safety checks — bail out early if the environment isn't right.
-    lines.append('if [[ $EUID -eq 0 ]]; then')
-    lines.append('    echo "Run this script as a normal user, not as root."')
+    # This script must run as root — it creates a user and modifies system files.
+    lines.append('if [[ $EUID -ne 0 ]]; then')
+    lines.append('    echo "This script must be run as root: sudo bash 3-setup.sh"')
     lines.append("    exit 1")
     lines.append("fi")
-    lines.append('if ! command -v sudo >/dev/null 2>&1; then')
-    lines.append('    echo "sudo is required but was not found."')
-    lines.append("    exit 1")
+    lines.append("")
+
+    # SCRIPT_DIR points to the directory containing this script.
+    # Using BASH_SOURCE[0] instead of $0 ensures it works when the script is
+    # sourced or called via a path like /path/to/3-setup.sh.
+    # We need this to find mise.toml and .zshrc.setup regardless of what
+    # directory the caller is in when they run the script.
+    lines.append('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"')
+    lines.append("")
+
+    # Read target_user and target_password from config, or prompt if blank.
+    # Prompting at runtime keeps credentials out of the generated file.
+    target_user = system_config.get("target_user") or ""
+    target_password = system_config.get("target_password") or ""
+    copy_root_ssh_keys = system_config.get("copy_root_ssh_keys", True)
+
+    lines.append(f'TARGET_USER="{target_user}"')
+    lines.append('if [[ -z "$TARGET_USER" ]]; then')
+    lines.append('    read -rp "Enter the username to create: " TARGET_USER')
+    lines.append("fi")
+    lines.append("")
+
+    lines.append(f'TARGET_PASSWORD="{target_password}"')
+    lines.append('if [[ -z "$TARGET_PASSWORD" ]]; then')
+    lines.append('    read -rsp "Enter a password for $TARGET_USER: " TARGET_PASSWORD')
+    lines.append('    echo')
     lines.append("fi")
     lines.append("")
 
@@ -366,8 +387,8 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
     # so these two packages have to be installed first, separately from the main
     # apt block.
     lines.append('log "Bootstrapping prerequisites..."')
-    lines.append("sudo apt-get update -qq")
-    lines.append("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates")
+    lines.append("apt-get update -qq")
+    lines.append("DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates")
     lines.append('ok "Prerequisites ready"')
     lines.append("")
 
@@ -415,8 +436,8 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
     # generated script is easy to read and diff.
     if apt_packages:
         lines.append('log "Installing apt packages..."')
-        lines.append("sudo apt-get update -qq")
-        lines.append("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \\")
+        lines.append("apt-get update -qq")
+        lines.append("DEBIAN_FRONTEND=noninteractive apt-get install -y \\")
 
         for package_name in apt_packages:
             lines.append(f"    {package_name} \\")
@@ -427,43 +448,117 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools):
         lines.append('ok "apt packages installed"')
         lines.append("")
 
+    # ── Section 1.5: User setup ───────────────────────────────────────────────
+    # All apt packages (including zsh) are now installed.
+    # We can safely create the user, set their shell, copy SSH keys,
+    # and place the generated config files in their home directory.
+
+    # Create the user if they don't already exist.
+    # useradd -m creates a home directory; -s sets the login shell.
+    lines.append('log "Creating user $TARGET_USER..."')
+    lines.append('if id "$TARGET_USER" &>/dev/null; then')
+    lines.append('    ok "User $TARGET_USER already exists — skipping creation"')
+    lines.append("else")
+    lines.append('    useradd -m -s /usr/bin/zsh "$TARGET_USER"')
+    lines.append('    echo "$TARGET_USER:$TARGET_PASSWORD" | chpasswd')
+    lines.append('    usermod -aG sudo "$TARGET_USER"')
+    lines.append('    ok "User $TARGET_USER created and added to sudo group"')
+    lines.append("fi")
+    lines.append("")
+
+    # Set zsh as the default shell even if the user already existed.
+    # getent passwd reads the system user database; cut -d: -f7 extracts the shell field.
+    lines.append('if [ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" != "/usr/bin/zsh" ]; then')
+    lines.append('    log "Setting zsh as default shell for $TARGET_USER..."')
+    lines.append('    chsh -s /usr/bin/zsh "$TARGET_USER"')
+    lines.append('    ok "Shell updated"')
+    lines.append("fi")
+    lines.append("")
+
+    # Copy root's authorized_keys to the new user so they can log in via SSH key.
+    # This is the safety net — the user should confirm key-based login works
+    # before running 99-lock-doors.sh to disable root access.
+    if copy_root_ssh_keys:
+        lines.append('log "Copying SSH keys to $TARGET_USER..."')
+        lines.append('USER_HOME="/home/$TARGET_USER"')
+        lines.append('mkdir -p "$USER_HOME/.ssh"')
+        lines.append('if [[ -f /root/.ssh/authorized_keys ]]; then')
+        lines.append('    cp /root/.ssh/authorized_keys "$USER_HOME/.ssh/authorized_keys"')
+        lines.append('    chmod 700 "$USER_HOME/.ssh"')
+        lines.append('    chmod 600 "$USER_HOME/.ssh/authorized_keys"')
+        lines.append('    chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.ssh"')
+        lines.append('    ok "SSH keys copied"')
+        lines.append("else")
+        lines.append('    echo "    WARNING: /root/.ssh/authorized_keys not found — skipping key copy"')
+        lines.append("fi")
+        lines.append("")
+
+    # Move the generated config files from the project directory into the
+    # target user's home directory, then fix ownership so the user owns them.
+    lines.append('log "Installing configuration files..."')
+    lines.append('USER_HOME="/home/$TARGET_USER"')
+    lines.append('mkdir -p "$USER_HOME/.config/mise"')
+    lines.append('cp "$SCRIPT_DIR/mise.toml" "$USER_HOME/.config/mise/config.toml"')
+    lines.append('cp "$SCRIPT_DIR/.zshrc.setup" "$USER_HOME/.zshrc"')
+    lines.append('chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.config"')
+    lines.append('chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.zshrc"')
+    lines.append('ok "Configuration files installed"')
+    lines.append("")
+
     # ── Section 2: mise tools ─────────────────────────────────────────────────
     # mise is now installed (from the apt section above).
-    # `mise install` reads mise.toml in the current directory and installs every
-    # tool declared there into ~/.local/share/mise — available globally.
-    # If there are no mise tools, this is a fast no-op.
+    # We run `mise install` as the target user so all tools land in their home
+    # directory, not in root's. `su - $TARGET_USER -c "..."` starts a login
+    # shell as that user, so mise's config in ~/.config/mise/config.toml is found.
     lines.append('log "Installing mise-managed tools..."')
-    lines.append("mise install")
+    lines.append('su - "$TARGET_USER" -c "mise install"')
     lines.append('ok "mise tools installed"')
     lines.append("")
 
     # ── Section 3: curl installers ────────────────────────────────────────────
+    # Same pattern: run each curl installer as the target user so the tool
+    # installs into their home directory, not root's.
     for tool in curl_tools:
         if tool.installed_check:
-            # If the tool is already present, skip the curl install entirely and
-            # tell the user to update it manually — curl installers are not safe
-            # to re-run blindly.
-            lines.append(f"if {tool.installed_check} > /dev/null 2>&1; then")
+            # If the tool is already present for this user, skip the curl install
+            # and tell the user to update it manually — curl installers are not
+            # safe to re-run blindly.
+            lines.append(f'if su - "$TARGET_USER" -c "{tool.installed_check}" > /dev/null 2>&1; then')
             lines.append(f'    log "{tool.name} already installed — to update, see the tool\'s own documentation"')
             lines.append("else")
             lines.append(f'    log "Installing {tool.name}..."')
-            lines.append(f"    curl -fsSL {tool.url} | bash")
+            lines.append(f'    su - "$TARGET_USER" -c "curl -fsSL {tool.url} | bash"')
             lines.append(f'    ok "{tool.name} installed"')
             lines.append("fi")
         else:
             lines.append(f'log "Installing {tool.name}..."')
-            lines.append(f"    curl -fsSL {tool.url} | bash")
+            lines.append(f'su - "$TARGET_USER" -c "curl -fsSL {tool.url} | bash"')
             lines.append(f'ok "{tool.name} installed"')
 
         lines.append("")
 
-    # ── Done ──────────────────────────────────────────────────────────────────
-    # Point the user to the two generated files they should read next.
+    # ── Section 4: Two-terminal warning ──────────────────────────────────────
+    # The setup script deliberately does NOT touch SSH config.
+    # The user must verify they can log in as the new user before running
+    # 99-lock-doors.sh to disable root access and password logins.
+    # THIS_IP makes the SSH test command copy-paste ready.
+    lines.append('THIS_IP=$(hostname -I | awk \'{ print $1 }\')')
     lines.append('log "Setup complete!"')
     lines.append('echo ""')
-    lines.append('echo "Next steps:"')
-    lines.append('echo "  4-post-install-steps.md — Review before you start: a few short steps will have the system up and running"')
-    lines.append('echo "  tool-reference.md       — reference guide for installed tools"')
+    lines.append('printf "\\033[1;33m"')
+    lines.append('echo "  CRITICAL NEXT STEPS:"')
+    lines.append('echo "  ─────────────────────────────────────────────────────────"')
+    lines.append('echo "  1. Do NOT close this window."')
+    lines.append('echo "  2. Open a NEW terminal on your local machine."')
+    lines.append('echo "  3. Verify you can log in via SSH key:"')
+    lines.append('echo "       ssh $TARGET_USER@$THIS_IP"')
+    lines.append('echo ""')
+    lines.append('echo "  4. Once logged in as $TARGET_USER, run the hardening script:"')
+    lines.append('echo "       sudo bash /home/$TARGET_USER/cutekit/99-lock-doors.sh"')
+    lines.append('echo ""')
+    lines.append('echo "  5. Review post-install steps:"')
+    lines.append('echo "       cat /home/$TARGET_USER/cutekit/4-post-install-steps.md"')
+    lines.append('printf "\\033[0m"')
     lines.append('echo ""')
     lines.append("")
 
@@ -480,7 +575,11 @@ def write_setup_sh(tools, config):
     apt_packages = get_apt_packages(tools)
     curl_tools = get_curl_tools(tools)
 
-    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools)
+    # Pass the system: section from config so the script can embed target_user
+    # and other system settings, or prompt for them at runtime if left blank.
+    system_config = config.get("system", {})
+
+    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config)
     write_text_file("3-setup.sh", setup_sh_text)
 
     current_mode = os.stat("3-setup.sh").st_mode
@@ -640,6 +739,108 @@ def write_tool_reference(tools):
     print(f"Wrote: tool-reference.md ({len(tools_with_reference)} tools with notes)")
 
 
+# ─── 99-lock-doors.sh ────────────────────────────────────────────────────────
+#
+# This is the "kill-switch" script — it hardens SSH by disabling root login
+# and password authentication. It must ONLY be run after the user has confirmed
+# they can log in as the target user via SSH key. Running it prematurely locks
+# everyone out.
+#
+# Rather than modifying /etc/ssh/sshd_config directly (fragile, easy to break),
+# we write a drop-in file to /etc/ssh/sshd_config.d/. Drop-in files override
+# the main config and are the recommended approach on modern Ubuntu.
+#
+# Generation is controlled by the ssh_hardening flag in the system: config block.
+
+def build_lock_doors_sh_text(system_config):
+    """
+    Builds the full text content for 99-lock-doors.sh.
+    This script disables root SSH login and password authentication by writing
+    a drop-in config file, then reloads sshd.
+    """
+    lines = []
+
+    lines.append("#!/usr/bin/env bash")
+    lines.append("# Generated by 2-generate.py")
+    lines.append("# Do not edit directly — edit 1-config.yaml and regenerate.")
+    lines.append("#")
+    lines.append("# WARNING: Only run this after confirming you can SSH in as the new user.")
+    lines.append("# Running this script locks out root and disables password logins.")
+    lines.append("")
+    lines.append("set -euo pipefail")
+    lines.append("")
+
+    lines.append('log() { printf "\\n\\033[1;34m==> %s\\033[0m\\n" "$1"; }')
+    lines.append('ok()  { printf "    \\033[0;32mOK: %s\\033[0m\\n" "$1"; }')
+    lines.append("")
+
+    # This script modifies system SSH config, so it must run as root.
+    lines.append('if [[ $EUID -ne 0 ]]; then')
+    lines.append('    echo "This script must be run as root: sudo bash 99-lock-doors.sh"')
+    lines.append("    exit 1")
+    lines.append("fi")
+    lines.append("")
+
+    # Write the drop-in hardening config.
+    # /etc/ssh/sshd_config.d/ files are included by the main sshd_config on
+    # Ubuntu 22.04+ and override any matching settings in the main file.
+    lines.append('log "Writing SSH hardening config..."')
+    lines.append('HARDENING_FILE="/etc/ssh/sshd_config.d/99-hardening.conf"')
+    lines.append('cat > "$HARDENING_FILE" << \'EOF\'')
+    lines.append("# CUTEkit SSH hardening — generated by 2-generate.py")
+    lines.append("# Disables root login and password authentication.")
+    lines.append("PermitRootLogin no")
+    lines.append("PasswordAuthentication no")
+    lines.append("EOF")
+    lines.append('ok "Hardening config written to $HARDENING_FILE"')
+    lines.append("")
+
+    # Test the config before reloading — sshd -t catches syntax errors and
+    # will exit non-zero if something is wrong, stopping the script before
+    # any changes take effect.
+    lines.append('log "Testing SSH config..."')
+    lines.append("sshd -t")
+    lines.append('ok "SSH config is valid"')
+    lines.append("")
+
+    # Reload sshd to pick up the new drop-in file.
+    # `reload` applies config changes without dropping existing connections,
+    # so the current root session stays open if something goes wrong.
+    lines.append('log "Reloading SSH daemon..."')
+    lines.append("systemctl reload ssh")
+    lines.append('ok "SSH daemon reloaded"')
+    lines.append("")
+
+    lines.append('log "Doors locked."')
+    lines.append('echo ""')
+    lines.append('echo "  Root login and password authentication are now disabled."')
+    lines.append('echo "  Key-based login as your user is the only way in."')
+    lines.append('echo ""')
+
+    return "\n".join(lines)
+
+
+def write_lock_doors_sh(config):
+    """
+    Reads the ssh_hardening flag from the system: config block.
+    If enabled (the default), builds and writes 99-lock-doors.sh.
+    If disabled, skips silently.
+    """
+    system_config = config.get("system", {})
+    ssh_hardening = system_config.get("ssh_hardening", True)
+
+    if not ssh_hardening:
+        return
+
+    lock_doors_text = build_lock_doors_sh_text(system_config)
+    write_text_file("99-lock-doors.sh", lock_doors_text)
+
+    current_mode = os.stat("99-lock-doors.sh").st_mode
+    os.chmod("99-lock-doors.sh", current_mode | stat.S_IEXEC)
+
+    print("Wrote: 99-lock-doors.sh")
+
+
 # ─── Summarize ────────────────────────────────────────────────────────────────
 #
 # build_install_list_lines() builds the apt/mise install list as plain-text lines.
@@ -737,7 +938,10 @@ def main():
     # Step 10 — Write tool-reference.md
     write_tool_reference(tools)
 
-    # Step 11 — Remind the user to run the setup script
+    # Step 11 — Write 99-lock-doors.sh (SSH hardening kill-switch)
+    write_lock_doors_sh(config)
+
+    # Step 12 — Remind the user to run the setup script
     print()
     print("Files generated. Next: bash 3-setup.sh")
 

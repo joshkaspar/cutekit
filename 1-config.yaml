@@ -4,11 +4,18 @@
 #   python3 2-generate.py
 #
 # Generated files (do not edit directly):
-#   3-setup.sh                        — apt installs and curl-based installers
-#   ~/.config/mise/config.toml        — all mise-managed tools
-#   .zshrc.setup                      — shell init snippets (source this from your .zshrc)
+#   3-setup.sh              — runs as root; creates user, installs packages
+#   mise.toml               — mise tool manifest (3-setup.sh moves this into place)
+#   .zshrc.setup            — shell init snippets
 #   4-post-install-steps.md
 #   tool-reference.md
+#   99-lock-doors.sh        — SSH hardening (run only after confirming new user login)
+
+system:
+  target_user: ""            # The non-root user to create and configure (leave blank to be prompted)
+  target_password: ""        # Leave blank to be prompted at runtime (recommended)
+  copy_root_ssh_keys: true   # Copy /root/.ssh/authorized_keys to the new user (safety net)
+  ssh_hardening: true        # Generate 99-lock-doors.sh to disable root/password login
 
 shell:
   family: zsh
@@ -301,18 +308,14 @@ tools:
     backend: apt
     package: zsh
     post_install:
-      - 'Configure your shell'
-      - 'Fresh install (recommended): cp .zshrc.setup ~/.zshrc'
-      - 'Existing .zshrc: add the REQUIRED TOOL-SPECIFIC ENTRIES section from .zshrc.setup to your config'
-      - 'Set zsh as your default shell: chsh -s $(which zsh)'
-      - 'Log out and back in for the change to take effect'
+      - 'Your shell config was installed to ~/.zshrc during setup'
+      - 'To customize your shell, edit ~/.zshrc directly'
 
   - name: zellij
     version: latest
     shell_setup:
       - 'eval "$(zellij setup --generate-auto-start zsh)"'
     post_install:
-      - 'Zellij will autostart on SSH login once .zshrc.setup is sourced'
       - 'To enable the web terminal, add to ~/.config/zellij/config.kdl: start_web_server true'
       - 'Or enable it from the session manager (Ctrl o + s)'
       - 'Create a login token (shown once — save it): zellij web --create-token'
@@ -322,9 +325,8 @@ tools:
     backend: apt
     package: openssh-server
     post_install:
-      - 'After confirming key-based login works, disable password auth'
-      - 'Create /etc/ssh/sshd_config.d/99-hardening.conf and add: PasswordAuthentication no'
-      - 'Reload sshd: sudo systemctl reload ssh'
+      - 'If SSH hardening was not completed during setup, open a new terminal and confirm you can log in as your user'
+      - 'Then run the hardening script: sudo bash ~/cutekit/99-lock-doors.sh'
 
 # ── Optional runtimes (required for certain backends) ──────────────────────
   # Uncomment the runtime for any backend you plan to use.
