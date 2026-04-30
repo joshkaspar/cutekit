@@ -198,7 +198,7 @@ def build_mise_toml_text(mise_tools):
 
 
 def write_text_file(filepath, text):
-    with open(filepath, "w") as output_file:
+    with open(filepath, "w", encoding="utf-8") as output_file:
         output_file.write(text)
 
 
@@ -269,7 +269,7 @@ def get_curl_tools(tools):
     return curl_tools
 
 
-def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config):
+def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config, shell_setup_file=".zshrc.setup"):
     """
     Builds the full text content for 3-setup.sh.
     Accepts pre-filtered lists so this function only has to format, not filter.
@@ -445,7 +445,7 @@ def build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_con
     lines.append('USER_HOME="/home/$TARGET_USER"')
     lines.append('mkdir -p "$USER_HOME/.config/mise"')
     lines.append('cp "$SCRIPT_DIR/mise.toml" "$USER_HOME/.config/mise/config.toml"')
-    lines.append('cp "$SCRIPT_DIR/.zshrc.setup" "$USER_HOME/.zshrc"')
+    lines.append(f'cp "$SCRIPT_DIR/{shell_setup_file}" "$USER_HOME/.zshrc"')
     lines.append('chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.config"')
     lines.append('chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.zshrc"')
     lines.append('mkdir -p "$USER_HOME/cutekit"')
@@ -528,8 +528,9 @@ def write_setup_sh(tools, config):
     # Pass the system: section from config so the script can embed target_user
     # and other system settings, or prompt for them at runtime if left blank.
     system_config = config.get("system", {})
+    shell_setup_file = config.get("shell", {}).get("setup_file", ".zshrc.setup")
 
-    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config)
+    setup_sh_text = build_setup_sh_text(apt_packages, curl_tools, custom_setup_tools, system_config, shell_setup_file)
     write_text_file("3-setup.sh", setup_sh_text)
 
     current_mode = os.stat("3-setup.sh").st_mode
