@@ -5,7 +5,7 @@ A bootstrap script that turns a fresh Ubuntu 24.04 server into a persistent, bro
 
 ### 1. Download the files
 ```bash
-curl -L https://github.com/joshkaspar/cutekit/archive/refs/heads/main.tar.gz | tar -xz
+curl -L https://github.com/joshkaspar/CUTEkit/archive/refs/heads/main.tar.gz | tar -xz
 cd cutekit-main
 ```
 
